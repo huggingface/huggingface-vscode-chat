@@ -3,7 +3,6 @@ import {
     CancellationToken,
     LanguageModelChatInformation,
     LanguageModelChatMessage,
-    LanguageModelChatMessageRole,
     LanguageModelChatProvider,
     LanguageModelChatRequestHandleOptions,
     LanguageModelResponsePart,
@@ -67,66 +66,6 @@ interface HFChatCompletionResponse {
 interface OpenAIToolCall { id: string; type: 'function'; function: { name: string; arguments: string } };
 interface OpenAIFunctionToolDef { type: 'function'; function: { name: string; description?: string; parameters?: object } };
 
-// Fetches and composes `LanguageModelChatInformation` for a given model id.
-async function getChatModelInfo(
-    id: string,
-    name: string,
-    opts?: { apiKey?: string; routerModel?: HFModelItem; hfInfoMap?: Map<string, HFExtraModelInfo> }
-): Promise<LanguageModelChatInformation> {
-    let routerModel = opts?.routerModel as HFModelItem | undefined;
-    if (!routerModel && opts?.apiKey) {
-        try {
-            const resp = await fetch(`${BASE_URL}/models`, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${opts.apiKey}` }
-            });
-            if (resp.ok) {
-                const all = (await resp.json()) as HFModelsResponse;
-                routerModel = all.data?.find(m => m.id === id);
-            }
-        } catch (error) {
-            console.error('Failed to fetch router model:', error);
-            throw new Error('Unable to fetch model information from Hugging Face.');
-        }
-    }
-
-    let hfInfo: HFExtraModelInfo | undefined;
-    if (opts?.hfInfoMap) {
-        hfInfo = opts.hfInfoMap.get(id);
-    } else {
-        try {
-            const infoResp = await fetch('https://huggingface.co/api/models?other=conversational&inference=warm', { method: 'GET' });
-            if (infoResp.ok) {
-                const infos = (await infoResp.json()) as HFExtraModelInfo[];
-                hfInfo = infos.find(i => i.id === id);
-            }
-        } catch (error) {
-            console.error('Failed to fetch optional model metadata:', error);
-            // Optional metadata, continue without it
-        }
-    }
-
-    const contextLen = routerModel?.providers?.[0]?.context_length ?? DEFAULT_CONTEXT_LENGTH;
-    const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
-    const maxInput = Math.max(1, contextLen - maxOutput);
-    const toolCalling = !!(routerModel?.providers?.some(p => p.supports_tools === true));
-    const vision = hfInfo?.pipeline_tag === 'image-text-to-text';
-
-    return {
-        id,
-        name,
-        tooltip: 'Hugging Face',
-        family: 'huggingface',
-        version: '1.0.0',
-        maxInputTokens: maxInput,
-        maxOutputTokens: maxOutput,
-        capabilities: {
-            toolCalling,
-            imageInput: vision
-        }
-    };
-}
-
 export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
     constructor(private readonly secrets: vscode.SecretStorage) { }
 
@@ -136,14 +75,74 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             return [];
         }
 
-        const models = await this.fetchModels(apiKey);
-        const hfInfoMap = await this.fetchHFExtraModelInfoMap();
+        const { models, hfInfoMap } = await this.fetchModels(apiKey);
 
-        const infos = await Promise.all(models.map(async (m) => {
-            return getChatModelInfo(m.id, m.id, { apiKey, routerModel: m, hfInfoMap });
-        }));
+        const infos: LanguageModelChatInformation[] = models.map((m) => {
+            const contextLen = m?.providers?.[0]?.context_length ?? DEFAULT_CONTEXT_LENGTH;
+            const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
+            const maxInput = Math.max(1, contextLen - maxOutput);
+            const toolCalling = !!(m?.providers?.some(p => p.supports_tools === true));
+            const hfInfo = hfInfoMap.get(m.id);
+            const vision = hfInfo?.pipeline_tag === 'image-text-to-text';
+
+            return {
+                id: m.id,
+                name: m.id,
+                tooltip: 'Hugging Face',
+                family: 'huggingface',
+                version: '1.0.0',
+                maxInputTokens: maxInput,
+                maxOutputTokens: maxOutput,
+                capabilities: {
+                    toolCalling,
+                    imageInput: vision
+                }
+            } satisfies LanguageModelChatInformation;
+        });
 
         return infos;
+    }
+
+     private async fetchModels(apiKey: string): Promise<{ models: HFModelItem[]; hfInfoMap: Map<string, HFExtraModelInfo> }> {
+        const modelsList = (async () => {
+            const resp = await fetch(`${BASE_URL}/models`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+            if (!resp.ok) {
+                let text = '';
+                try {
+                    text = await resp.text();
+                } catch (error) {
+                    console.error('Failed to read response text:', error);
+                }
+                throw new Error(`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ''}`);
+            }
+            const parsed = (await resp.json()) as HFModelsResponse;
+            return parsed.data ?? [];
+        })();
+
+        const ModelsInfo = (async () => {
+            const map = new Map<string, HFExtraModelInfo>();
+            try {
+                const resp = await fetch('https://huggingface.co/api/models?other=conversational&inference=warm', { method: 'GET' });
+                if (!resp.ok) {
+                    return map;
+                }
+                const arr = (await resp.json()) as HFExtraModelInfo[];
+                for (const item of arr) {
+                    if (item?.id) {
+                        map.set(item.id, item);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch Hugging Face model metadata:', error);
+            }
+            return map;
+        })();
+
+        const [models, infos] = await Promise.all([modelsList, ModelsInfo]);
+        return { models, hfInfoMap: infos };
     }
 
     async provideLanguageModelChatResponse(
@@ -151,7 +150,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         messages: readonly LanguageModelChatMessage[],
         options: LanguageModelChatRequestHandleOptions,
         progress: Progress<LanguageModelResponsePart>,
-        _token: CancellationToken
+        token: CancellationToken
     ): Promise<void> {
         const apiKey = await this.secrets.get('huggingface.apiKey');
         if (!apiKey) {
@@ -162,31 +161,37 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         const toolsPayload = model.capabilities?.toolCalling ? this.convertTools(options) : {};
         const modelOptions = options.modelOptions ?? {};
         const body = {
+            ...modelOptions,
             model: model.id,
             messages: converted,
             stream: false,
             ...(toolsPayload.tools ? { tools: toolsPayload.tools } : {}),
-            ...(toolsPayload.tool_choice ? { tool_choice: toolsPayload.tool_choice } : {}),
-            ...modelOptions
+            ...(toolsPayload.tool_choice ? { tool_choice: toolsPayload.tool_choice } : {})
         } as const;
 
+        const controller = new AbortController();
+        const cancelSub = token.onCancellationRequested(() => controller.abort());
         const resp = await fetch(`${BASE_URL}/chat/completions`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: controller.signal
         });
+        cancelSub.dispose();
 
         if (!resp.ok) {
+            const reqId = resp.headers.get('x-request-id') ?? resp.headers.get('x-requestid') ?? '';
             let text = '';
             try {
                 text = await resp.text();
             } catch (error) {
                 console.error('Failed to read response text:', error);
             }
-            throw new Error(`Hugging Face chat error: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ''}`);
+            const idNote = reqId ? `\nrequest-id: ${reqId}` : '';
+            throw new Error(`Hugging Face chat error: ${resp.status} ${resp.statusText}${idNote}${text ? `\n${text}` : ''}`);
         }
 
         const data = (await resp.json()) as HFChatCompletionResponse;
@@ -220,7 +225,14 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         if (typeof text === 'string') {
             return Math.ceil(text.length / 4);
         }
-        const joined = this.extractTextFromMessage(text);
+        const parts = text.content ?? [];
+        const texts: string[] = [];
+        for (const part of parts) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+                texts.push(part.value);
+            }
+        }
+        const joined = texts.join('');
         return Math.ceil(joined.length / 4);
     }
 
@@ -241,50 +253,18 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         return apiKey;
     }
 
-    private async fetchModels(apiKey: string): Promise<HFModelItem[]> {
-        const resp = await fetch(`${BASE_URL}/models`, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${apiKey}` }
-        });
-        if (!resp.ok) {
-            let text = '';
-            try {
-                text = await resp.text();
-            } catch (error) {
-                console.error('Failed to read response text:', error);
-            }
-            throw new Error(`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ''}`);
-        }
-        const parsed = (await resp.json()) as HFModelsResponse;
-        // Do not filter by provider status; allow users to pick any
-        return parsed.data ?? [];
-    }
-
-    private async fetchHFExtraModelInfoMap(): Promise<Map<string, HFExtraModelInfo>> {
-        const map = new Map<string, HFExtraModelInfo>();
-        try {
-            const resp = await fetch('https://huggingface.co/api/models?other=conversational&inference=warm', { method: 'GET' });
-            if (!resp.ok) {
-                return map;
-            }
-            const arr = (await resp.json()) as HFExtraModelInfo[];
-            for (const item of arr) {
-                if (item?.id) {
-                    map.set(item.id, item);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to fetch Hugging Face model metadata:', error);
-        }
-        return map;
-    }
 
     private convertMessages(messages: readonly LanguageModelChatMessage[]): Array<
         { role: 'user' | 'assistant' | 'tool'; content?: string; name?: string; tool_calls?: OpenAIToolCall[]; tool_call_id?: string }
     > {
         const out: Array<{ role: 'user' | 'assistant' | 'tool'; content?: string; name?: string; tool_calls?: OpenAIToolCall[]; tool_call_id?: string }> = [];
         for (const m of messages) {
-            const role = this.mapRole(m.role);
+            let role: 'user' | 'assistant' | undefined;
+            switch (m.role) {
+                case vscode.LanguageModelChatMessageRole.User: role = 'user'; break;
+                case vscode.LanguageModelChatMessageRole.Assistant: role = 'assistant'; break;
+                default: role = undefined; break;
+            }
             const textParts: string[] = [];
             const toolCalls: OpenAIToolCall[] = [];
             const toolResults: { callId: string; content: string }[] = [];
@@ -294,7 +274,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                     textParts.push(part.value);
                 } else if (part instanceof vscode.LanguageModelToolCallPart) {
                     const id = part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                    const args = JSON.stringify(part.input ?? {});
+                    let args = '{}';
+                    try { args = JSON.stringify(part.input ?? {}); } catch (error) { console.error('Failed to stringify tool call input:', error); args = '{}'; }
                     toolCalls.push({ id, type: 'function', function: { name: part.name, arguments: args } });
                 } else if (part instanceof vscode.LanguageModelToolResultPart) {
                     let text = '';
@@ -304,7 +285,6 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                         } else if (typeof c === 'string') {
                             text += c;
                         } else {
-                            // best-effort stringify
                             try { text += JSON.stringify(c); } catch (error) { console.error('Failed to stringify content:', error); }
                         }
                     }
@@ -330,25 +310,6 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             }
         }
         return out;
-    }
-
-    private mapRole(role: LanguageModelChatMessageRole): 'user' | 'assistant' | undefined {
-        switch (role) {
-            case vscode.LanguageModelChatMessageRole.User: return 'user';
-            case vscode.LanguageModelChatMessageRole.Assistant: return 'assistant';
-            default: return undefined;
-        }
-    }
-
-    private extractTextFromMessage(m: LanguageModelChatMessage): string {
-        const parts = m.content ?? [];
-        const texts: string[] = [];
-        for (const part of parts) {
-            if (part instanceof vscode.LanguageModelTextPart) {
-                texts.push(part.value);
-            }
-        }
-        return texts.join('');
     }
 
     private convertTools(options: LanguageModelChatRequestHandleOptions): { tools?: OpenAIFunctionToolDef[]; tool_choice?: 'auto' | 'required' } {
