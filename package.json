@@ -38,15 +38,19 @@
 		"postinstall": "npm run download-api",
 		"compile": "tsc -p ./",
 		"lint": "eslint",
-		"watch": "tsc -watch -p ./"
+		"watch": "tsc -watch -p ./",
+		"test": "pnpm run compile && vscode-test"
 	},
 	"dependencies": {},
 	"devDependencies": {
 		"@eslint/js": "^9.13.0",
 		"@stylistic/eslint-plugin": "^2.9.0",
 		"@types/node": "^22",
+		"@types/mocha": "^10.0.6",
 		"@vscode/dts": "^0.4.1",
 		"@types/vscode": "^1.103.0",
+		"@vscode/test-cli": "^0.0.11",
+		"@vscode/test-electron": "^2.5.2",
 		"eslint": "^9.13.0",
 		"typescript": "^5.9.2",
 		"typescript-eslint": "^8.39.0"
