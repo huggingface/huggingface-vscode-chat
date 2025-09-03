@@ -183,7 +183,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         cancelSub.dispose();
 
         if (!resp.ok) {
-            const reqId = resp.headers.get('x-request-id') ?? resp.headers.get('x-requestid') ?? '';
+            const reqId = resp.headers.get('x-request-id') ?? '';
             let text = '';
             try {
                 text = await resp.text();
