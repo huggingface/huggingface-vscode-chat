@@ -9,26 +9,6 @@ import {
     Progress,
 } from 'vscode';
 
-/*
- * DEBUG LOGGING FOR TOOL CALLING:
- * This file includes comprehensive debug logging prefixed with '[HF Debug]' to help troubleshoot tool calling issues.
- * Look for these log messages in the VS Code developer console (Help > Toggle Developer Tools > Console):
- *
- * - Message conversion: Shows how VS Code messages are converted to OpenAI format
- * - Tool conversion: Shows how VS Code tools are converted to OpenAI function definitions
- * - Request validation: Validates message structure and tool call/result pairing
- * - API requests: Shows the full request body sent to Hugging Face
- * - API responses: Shows streaming response chunks and their processing
- * - Tool emissions: Shows when tool calls are emitted to VS Code
- *
- * Common issues to look for:
- * - Messages not being converted properly (check roles and content parts)
- * - Tools not being included in requests (check tool conversion)
- * - Invalid tool names (must match ^[\w-]+$)
- * - Missing tool results for tool calls (validation errors)
- * - HF API responses not containing expected tool_call structures
- * - JSON parsing errors in streaming responses
- */
 
 const BASE_URL = 'https://router.huggingface.co/v1';
 const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
@@ -63,16 +43,13 @@ interface HFModelsResponse {
 interface OpenAIToolCall { id: string; type: 'function'; function: { name: string; arguments: string } };
 interface OpenAIFunctionToolDef { type: 'function'; function: { name: string; description?: string; parameters?: object } };
 
-/* ================================================================================================
- * Provider: unchanged API surface; wires the wrapper in.
- * ==============================================================================================*/
-export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
-    private readonly _lmWrapper: HuggingFaceLanguageModelWrapper;
-    private _chatEndpoints: { model: string; modelMaxPromptTokens: number }[] = [];
 
-    constructor(private readonly secrets: vscode.SecretStorage) {
-        this._lmWrapper = new HuggingFaceLanguageModelWrapper(this.secrets);
-    }
+export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
+    private _chatEndpoints: { model: string; modelMaxPromptTokens: number }[] = [];
+    // Buffer for streaming tool calls
+    private _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }> = new Map<number, { id?: string; name?: string; args: string }>();
+
+    constructor(private readonly secrets: vscode.SecretStorage) {}
 
 
     async prepareLanguageModelChatInformation(options: { silent: boolean; }, _token: CancellationToken): Promise<LanguageModelChatInformation[]> {
@@ -163,56 +140,11 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         progress: Progress<LanguageModelResponsePart>,
         token: CancellationToken
     ): Promise<void> {
-        return this._lmWrapper.provideLanguageModelChatResponse(model, messages, options, progress, token);
-    }
-
-    async provideTokenCount(
-        model: LanguageModelChatInformation,
-        text: string | LanguageModelChatMessage,
-        _token: CancellationToken
-    ): Promise<number> {
-        return this._lmWrapper.provideTokenCount(model, text);
-    }
-
-    private async ensureApiKey(silent: boolean): Promise<string | undefined> {
-        let apiKey = await this.secrets.get('huggingface.apiKey');
-        if (!apiKey && !silent) {
-            const entered = await vscode.window.showInputBox({
-                title: 'Hugging Face API Key',
-                prompt: 'Enter your Hugging Face API key',
-                ignoreFocusOut: true,
-                password: true
-            });
-            if (entered && entered.trim()) {
-                apiKey = entered.trim();
-                await this.secrets.store('huggingface.apiKey', apiKey);
-            }
-        }
-        return apiKey;
-    }
-}
-
-/* ================================================================================================
- * Wrapper: mirrors Copilot logic (validation → budgeting → safety prompt → request → streaming).
- * ==============================================================================================*/
-class HuggingFaceLanguageModelWrapper {
-    constructor(private readonly secrets: vscode.SecretStorage) {}
-
-    // Buffers streaming tool_calls arguments by index until complete JSON is assembled
-    private _toolCallBuffers: Map<number, { id?: string; name?: string; args: string }> = new Map<number, { id?: string; name?: string; args: string }>();
-
-    async provideLanguageModelChatResponse(
-        model: vscode.LanguageModelChatInformation,
-        messages: readonly vscode.LanguageModelChatMessage[],
-        options: vscode.LanguageModelChatRequestHandleOptions,
-        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-        token: vscode.CancellationToken
-    ): Promise<void> {
         console.log('[HF Debug] Starting chat response for model:', model.id);
         console.log('[HF Debug] Input messages:', messages.length);
         console.log('[HF Debug] Tool options:', options.tools ? options.tools.length : 0, 'tools');
 
-        const apiKey = await this.ensureApiKey();
+        const apiKey = await this.ensureApiKey(true);
         if (!apiKey) {
             throw new Error('Hugging Face API key not found');
         }
@@ -237,7 +169,7 @@ class HuggingFaceLanguageModelWrapper {
             this.validateTools(options.tools);
         }
 
-        // Match Copilot behavior: hard-limit number of tools
+        // Copilot parity: limit number of tools
         if (options.tools && options.tools.length > 128) {
             throw new Error('Cannot have more than 128 tools per request.');
         }
@@ -251,7 +183,7 @@ class HuggingFaceLanguageModelWrapper {
             temperature: options.modelOptions?.temperature ?? 0.7,
         };
 
-        // Allow-list model options similar to Copilot's LanguageModelOptions
+        // Allow-list model options
         if (options.modelOptions) {
             const mo = options.modelOptions as Record<string, unknown>;
             if (typeof mo.stop === 'string' || Array.isArray(mo.stop)) {
@@ -274,47 +206,40 @@ class HuggingFaceLanguageModelWrapper {
 
         console.log('[HF Debug] Request body:', JSON.stringify(requestBody, null, 2));
 
-        try {
-            const response = await fetch(`${BASE_URL}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody),
-            });
+        const response = await fetch(`${BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+        });
 
-            console.log('[HF Debug] HF API response status:', response.status);
+        console.log('[HF Debug] HF API response status:', response.status);
 
-            if (!response.ok) {
-                const errorText = await this.safeReadText(response);
-                console.error('[HF Debug] HF API error response:', errorText);
-                throw new Error(`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ''}`);
-            }
-
-            if (!response.body) {
-                throw new Error('No response body from Hugging Face API');
-            }
-
-            await this.processStreamingResponse(response.body, progress, token);
-
-        } catch (error) {
-            console.error('[HF Debug] Error in provideLanguageModelChatResponse:', error);
-            throw error;
+        if (!response.ok) {
+            const errorText = await this.safeReadText(response);
+            console.error('[HF Debug] HF API error response:', errorText);
+            throw new Error(`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ''}`);
         }
+
+        if (!response.body) {
+            throw new Error('No response body from Hugging Face API');
+        }
+
+        await this.processStreamingResponse(response.body, progress, token);
     }
 
     async provideTokenCount(
-        model: vscode.LanguageModelChatInformation,
-        message: string | vscode.LanguageModelChatMessage
+        model: LanguageModelChatInformation,
+        text: string | LanguageModelChatMessage,
+        _token: CancellationToken
     ): Promise<number> {
-        if (typeof message === 'string') {
-            // Rough estimation: ~4 characters per token
-            return Math.ceil(message.length / 4);
+        if (typeof text === 'string') {
+            return Math.ceil(text.length / 4);
         } else {
-            // Count tokens in message parts
             let totalTokens = 0;
-            for (const part of message.content) {
+            for (const part of text.content) {
                 if (part instanceof vscode.LanguageModelTextPart) {
                     totalTokens += Math.ceil(part.value.length / 4);
                 }
@@ -323,8 +248,21 @@ class HuggingFaceLanguageModelWrapper {
         }
     }
 
-    private async ensureApiKey(): Promise<string | undefined> {
-        return await this.secrets.get('huggingface.apiKey');
+    private async ensureApiKey(silent: boolean): Promise<string | undefined> {
+        let apiKey = await this.secrets.get('huggingface.apiKey');
+        if (!apiKey && !silent) {
+            const entered = await vscode.window.showInputBox({
+                title: 'Hugging Face API Key',
+                prompt: 'Enter your Hugging Face API key',
+                ignoreFocusOut: true,
+                password: true
+            });
+            if (entered && entered.trim()) {
+                apiKey = entered.trim();
+                await this.secrets.store('huggingface.apiKey', apiKey);
+            }
+        }
+        return apiKey;
     }
 
     private async safeReadText(resp: Response): Promise<string> {
@@ -355,7 +293,7 @@ class HuggingFaceLanguageModelWrapper {
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                buffer = lines.pop() || ''; // Keep incomplete line in buffer
+                buffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) {
@@ -364,7 +302,6 @@ class HuggingFaceLanguageModelWrapper {
                     const data = line.slice(6);
                     if (data === '[DONE]') {
                         console.log('[HF Debug] Received [DONE] marker');
-                        // Flush any buffered tool_calls on stream end
                         await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ true);
                         continue;
                     }
@@ -394,7 +331,6 @@ class HuggingFaceLanguageModelWrapper {
             return;
         }
 
-        // Handle text content
         const deltaObj = choice.delta as Record<string, unknown> | undefined;
         if (deltaObj?.content) {
             const content = deltaObj.content as string;
@@ -402,7 +338,6 @@ class HuggingFaceLanguageModelWrapper {
             progress.report(new vscode.LanguageModelTextPart(content));
         }
 
-        // Handle tool calls
         if (deltaObj?.tool_calls) {
             const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
             console.log('[HF Debug] Processing tool calls:', toolCalls.length);
@@ -422,14 +357,12 @@ class HuggingFaceLanguageModelWrapper {
                 }
                 this._toolCallBuffers.set(idx, buf);
 
-                // Try to emit if we already have a complete call
                 await this.tryEmitBufferedToolCall(idx, progress);
             }
         } else {
             console.log('[HF Debug] No tool calls in this delta');
         }
 
-        // Some providers set finish_reason to 'tool_calls' when tool calls are complete
         const finish = (choice.finish_reason as string | undefined) ?? undefined;
         if (finish === 'tool_calls' || finish === 'stop') {
             await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ finish === 'tool_calls');
@@ -440,7 +373,6 @@ class HuggingFaceLanguageModelWrapper {
         const buf = this._toolCallBuffers.get(index);
         if (!buf) { return; }
         if (!buf.name) { return; }
-        // Prefer to wait for id, but generate one if arguments look complete JSON
         const canParse = this.tryParseJSONObject(buf.args);
         if (!canParse.ok) { return; }
         const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
@@ -471,7 +403,6 @@ class HuggingFaceLanguageModelWrapper {
 
     private tryParseJSONObject(text: string): { ok: true; value: Record<string, unknown> } | { ok: false } {
         try {
-            // Must be non-empty and start with { or [ to be valid JSON object/array
             if (!text || !/[{]/.test(text)) {
                 return { ok: false };
             }
@@ -499,7 +430,6 @@ class HuggingFaceLanguageModelWrapper {
             } else if (r === ASSISTANT) {
                 role = 'assistant';
             } else {
-                // Treat unknown roles (e.g., System in newer APIs) as system
                 role = 'system';
             }
             const textParts: string[] = [];
@@ -538,7 +468,6 @@ class HuggingFaceLanguageModelWrapper {
 
             let emittedAssistantToolCall = false;
             if (toolCalls.length > 0) {
-                // Allow multiple tool calls, matching OpenAI schema
                 out.push({ role: 'assistant', content: textParts.join('') || undefined, tool_calls: toolCalls });
                 emittedAssistantToolCall = true;
                 console.log('[HF Debug] Emitted assistant message with tool calls:', { toolCallCount: toolCalls.length });
@@ -569,8 +498,7 @@ class HuggingFaceLanguageModelWrapper {
             return {};
         }
 
-        // Hugging Face API limitation: only one tool call per message
-        const effectiveTools = tools; // Do not limit here; request validation already caps count globally
+        const effectiveTools = tools;
         console.log('[HF Debug] Effective tools:', effectiveTools.length);
 
         const toolDefs: OpenAIFunctionToolDef[] = effectiveTools.map(t => {
@@ -674,5 +602,3 @@ class HuggingFaceLanguageModelWrapper {
         return hasCallId && hasContent;
     }
 }
-
-/* ------------------------ small util ------------------------ */
