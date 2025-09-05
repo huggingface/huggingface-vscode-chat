@@ -140,9 +140,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         progress: Progress<LanguageModelResponsePart>,
         token: CancellationToken
     ): Promise<void> {
-        console.log('[HF Debug] Starting chat response for model:', model.id);
-        console.log('[HF Debug] Input messages:', messages.length);
-        console.log('[HF Debug] Tool options:', options.tools ? options.tools.length : 0, 'tools');
+        console.log('Starting chat response for model:', model.id);
+        console.log('Input messages:', messages.length);
+        console.log('Tool options:', options.tools ? options.tools.length : 0, 'tools');
 
         const apiKey = await this.ensureApiKey(true);
         if (!apiKey) {
@@ -151,14 +151,14 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
         // Convert messages to OpenAI format
         const openaiMessages = this.convertMessages(messages);
-        console.log('[HF Debug] Converted messages:', openaiMessages.length);
+        console.log('Converted messages:', openaiMessages.length);
 
         // Validate the request structure
         this.validateRequest(messages);
 
         // Convert tools if present
         const toolConfig = this.convertTools(options);
-        console.log('[HF Debug] Tool config:', {
+        console.log('Tool config:', {
             hasTools: !!toolConfig.tools,
             toolCount: toolConfig.tools?.length || 0,
             toolChoice: toolConfig.tool_choice
@@ -204,7 +204,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             requestBody.tool_choice = toolConfig.tool_choice;
         }
 
-        console.log('[HF Debug] Request body:', JSON.stringify(requestBody, null, 2));
+        console.log('Request body:', JSON.stringify(requestBody, null, 2));
 
         const response = await fetch(`${BASE_URL}/chat/completions`, {
             method: 'POST',
@@ -215,11 +215,11 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             body: JSON.stringify(requestBody),
         });
 
-        console.log('[HF Debug] HF API response status:', response.status);
+        console.log('HF API response status:', response.status);
 
         if (!response.ok) {
             const errorText = await this.safeReadText(response);
-            console.error('[HF Debug] HF API error response:', errorText);
+            console.error('HF API error response:', errorText);
             throw new Error(`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ''}`);
         }
 
@@ -278,7 +278,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         progress: vscode.Progress<vscode.LanguageModelResponsePart>,
         token: vscode.CancellationToken
     ): Promise<void> {
-        console.log('[HF Debug] Starting streaming response processing');
+        console.log('Starting streaming response processing');
         const reader = responseBody.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -287,7 +287,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             while (!token.isCancellationRequested) {
                 const { done, value } = await reader.read();
                 if (done) {
-                    console.log('[HF Debug] Streaming response complete');
+                    console.log(' Streaming response complete');
                     break;
                 }
 
@@ -301,46 +301,46 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                     }
                     const data = line.slice(6);
                     if (data === '[DONE]') {
-                        console.log('[HF Debug] Received [DONE] marker');
+                        console.log(' Received [DONE] marker');
                         await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ true);
                         continue;
                     }
 
                     try {
                         const parsed = JSON.parse(data);
-                        console.log('[HF Debug] Processing chunk:', {
+                        console.log(' Processing chunk:', {
                             hasChoices: !!parsed.choices,
                             choiceCount: parsed.choices?.length || 0
                         });
                         await this.processDelta(parsed, progress);
                     } catch (parseError) {
-                        console.warn('[HF Debug] Failed to parse SSE chunk:', parseError, 'Raw data:', data.substring(0, 200));
+                        console.warn(' Failed to parse SSE chunk:', parseError, 'Raw data:', data.substring(0, 200));
                     }
                 }
             }
         } finally {
             reader.releaseLock();
-            console.log('[HF Debug] Streaming response reader released');
+            console.log('Streaming response reader released');
         }
     }
 
     private async processDelta(delta: Record<string, unknown>, progress: vscode.Progress<vscode.LanguageModelResponsePart>): Promise<void> {
         const choice = (delta.choices as Record<string, unknown>[] | undefined)?.[0];
         if (!choice) {
-            console.log('[HF Debug] No choices in delta');
+            console.log('No choices in delta');
             return;
         }
 
         const deltaObj = choice.delta as Record<string, unknown> | undefined;
         if (deltaObj?.content) {
             const content = deltaObj.content as string;
-            console.log('[HF Debug] Processing text delta:', content.substring(0, 100) + (content.length > 100 ? '...' : ''));
+            console.log('Processing text delta:', content.substring(0, 100) + (content.length > 100 ? '...' : ''));
             progress.report(new vscode.LanguageModelTextPart(content));
         }
 
         if (deltaObj?.tool_calls) {
             const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
-            console.log('[HF Debug] Processing tool calls:', toolCalls.length);
+            console.log('Processing tool calls:', toolCalls.length);
 
             for (const tc of toolCalls) {
                 const idx = (tc.index as number) ?? 0;
@@ -360,7 +360,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 await this.tryEmitBufferedToolCall(idx, progress);
             }
         } else {
-            console.log('[HF Debug] No tool calls in this delta');
+            console.log('No tool calls in this delta');
         }
 
         const finish = (choice.finish_reason as string | undefined) ?? undefined;
@@ -379,7 +379,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         const parameters = canParse.value;
         progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, parameters));
         this._toolCallBuffers.delete(index);
-        console.log('[HF Debug] Emitted buffered tool call:', { index, id, name: buf.name });
+        console.log('Emitted buffered tool call:', { index, id, name: buf.name });
     }
 
     private async flushToolCallBuffers(progress: vscode.Progress<vscode.LanguageModelResponsePart>, throwOnInvalid: boolean): Promise<void> {
@@ -388,7 +388,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             const parsed = this.tryParseJSONObject(buf.args);
             if (!parsed.ok) {
                 if (throwOnInvalid) {
-                    console.error('[HF Debug] Final tool call arguments are not valid JSON:', { idx, snippet: (buf.args || '').slice(0, 200) });
+                    console.error('Final tool call arguments are not valid JSON:', { idx, snippet: (buf.args || '').slice(0, 200) });
                     throw new Error('Invalid JSON for tool call');
                 }
                 continue;
@@ -396,7 +396,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
             const name = buf.name ?? 'unknown_tool';
             progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
-            console.log('[HF Debug] Flushed buffered tool call:', { idx, id, name });
+            console.log('Flushed buffered tool call:', { idx, id, name });
             this._toolCallBuffers.delete(idx);
         }
     }
@@ -417,14 +417,13 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
     }
 
     private convertMessages(messages: readonly vscode.LanguageModelChatMessage[]): Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content?: string; name?: string; tool_calls?: OpenAIToolCall[]; tool_call_id?: string }> {
-        console.log('[HF Debug] Converting messages, input count:', messages.length);
+        console.log('Converting messages, input count:', messages.length);
         const out: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content?: string; name?: string; tool_calls?: OpenAIToolCall[]; tool_call_id?: string }> = [];
-
+        const USER = vscode.LanguageModelChatMessageRole.User as unknown as number;
+        const ASSISTANT = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
         for (const m of messages) {
             let role: 'system' | 'user' | 'assistant' | undefined;
             const r = m.role as unknown as number;
-            const USER = vscode.LanguageModelChatMessageRole.User as unknown as number;
-            const ASSISTANT = vscode.LanguageModelChatMessageRole.Assistant as unknown as number;
             if (r === USER) {
                 role = 'user';
             } else if (r === ASSISTANT) {
@@ -436,18 +435,18 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             const toolCalls: OpenAIToolCall[] = [];
             const toolResults: { callId: string; content: string }[] = [];
 
-            console.log('[HF Debug] Processing message role:', m.role, 'content parts:', m.content?.length || 0);
+            console.log('Processing message role:', m.role, 'content parts:', m.content?.length || 0);
 
             for (const part of m.content ?? []) {
                 if (part instanceof vscode.LanguageModelTextPart) {
                     textParts.push(part.value);
-                    console.log('[HF Debug] Found text part:', part.value.substring(0, 100) + (part.value.length > 100 ? '...' : ''));
+                    console.log('Found text part:', part.value.substring(0, 100) + (part.value.length > 100 ? '...' : ''));
                 } else if (part instanceof vscode.LanguageModelToolCallPart) {
                     const id = part.callId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                     let args = '{}';
                     try { args = JSON.stringify(part.input ?? {}); } catch { args = '{}'; }
                     toolCalls.push({ id, type: 'function', function: { name: part.name, arguments: args } });
-                    console.log('[HF Debug] Found tool call part:', { id, name: part.name, args: args.substring(0, 200) + (args.length > 200 ? '...' : '') });
+                    console.log('Found tool call part:', { id, name: part.name, args: args.substring(0, 200) + (args.length > 200 ? '...' : '') });
                 } else if (this.isToolResultPart(part)) {
                     let text = '';
                     const pr = part as { content?: ReadonlyArray<unknown> };
@@ -462,7 +461,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                     }
                     const callId = (part as { callId?: string }).callId ?? '';
                     toolResults.push({ callId, content: text });
-                    console.log('[HF Debug] Found tool result part:', { callId, contentLength: text.length });
+                    console.log('Found tool result part:', { callId, contentLength: text.length });
                 }
             }
 
@@ -470,36 +469,36 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             if (toolCalls.length > 0) {
                 out.push({ role: 'assistant', content: textParts.join('') || undefined, tool_calls: toolCalls });
                 emittedAssistantToolCall = true;
-                console.log('[HF Debug] Emitted assistant message with tool calls:', { toolCallCount: toolCalls.length });
+                console.log('Emitted assistant message with tool calls:', { toolCallCount: toolCalls.length });
             }
 
             for (const tr of toolResults) {
                 out.push({ role: 'tool', tool_call_id: tr.callId, content: tr.content || '' });
-                console.log('[HF Debug] Emitted tool result message:', { callId: tr.callId, contentLength: tr.content?.length || 0 });
+                console.log('Emitted tool result message:', { callId: tr.callId, contentLength: tr.content?.length || 0 });
             }
 
             const text = textParts.join('');
             if (text && (role === 'system' || role === 'user' || (role === 'assistant' && !emittedAssistantToolCall))) {
                 out.push({ role, content: text });
-                console.log('[HF Debug] Emitted text message:', { role, contentLength: text.length });
+                console.log('Emitted text message:', { role, contentLength: text.length });
             }
         }
 
-        console.log('[HF Debug] Conversion complete, output messages:', out.length);
+        console.log('Conversion complete, output messages:', out.length);
         return out;
     }
 
     private convertTools(options: vscode.LanguageModelChatRequestHandleOptions): { tools?: OpenAIFunctionToolDef[]; tool_choice?: 'auto' | { type: 'function'; function: { name: string } } } {
         const tools = options.tools ?? [];
-        console.log('[HF Debug] Converting tools, input count:', tools.length);
+        console.log('Converting tools, input count:', tools.length);
 
         if (!tools || tools.length === 0) {
-            console.log('[HF Debug] No tools to convert');
+            console.log('No tools to convert');
             return {};
         }
 
         const effectiveTools = tools;
-        console.log('[HF Debug] Effective tools:', effectiveTools.length);
+        console.log('Effective tools:', effectiveTools.length);
 
         const toolDefs: OpenAIFunctionToolDef[] = effectiveTools.map(t => {
             const hasParams = !!(t.inputSchema && typeof t.inputSchema === 'object' && Object.keys(t.inputSchema as Record<string, unknown>).length);
@@ -511,24 +510,24 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                     parameters: hasParams ? t.inputSchema : undefined
                 }
             };
-            console.log('[HF Debug] Converted tool:', { name: t.name, hasDescription: !!t.description, hasSchema: !!t.inputSchema });
+            console.log('Converted tool:', { name: t.name, hasDescription: !!t.description, hasSchema: !!t.inputSchema });
             return def;
         });
 
         let tool_choice: 'auto' | { type: 'function'; function: { name: string } } = 'auto';
         if (options.toolMode === vscode.LanguageModelChatToolMode.Required) {
             if (tools.length !== 1) {
-                console.error('[HF Debug] ToolMode.Required but multiple tools:', tools.length);
+                console.error('ToolMode.Required but multiple tools:', tools.length);
                 throw new Error('LanguageModelChatToolMode.Required is not supported with more than one tool');
             }
             tool_choice = { type: 'function', function: { name: effectiveTools[0].name } };
-            console.log('[HF Debug] Set tool_choice to required:', tool_choice);
+            console.log('Set tool_choice to required:', tool_choice);
         } else {
-            console.log('[HF Debug] Tool choice remains auto');
+            console.log('Tool choice remains auto');
         }
 
         const result = { tools: toolDefs, tool_choice };
-        console.log('[HF Debug] Tool conversion complete:', {
+        console.log('Tool conversion complete:', {
             toolCount: toolDefs.length,
             toolChoice: tool_choice
         });
@@ -536,22 +535,22 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
     }
 
     private validateTools(tools: readonly vscode.LanguageModelChatTool[]): void {
-        console.log('[HF Debug] Validating tools:', tools.length);
+        console.log(' Validating tools:', tools.length);
         for (const tool of tools) {
-            console.log('[HF Debug] Validating tool:', tool.name);
+            console.log('Validating tool:', tool.name);
             if (!tool.name.match(/^[\w-]+$/)) {
-                console.error('[HF Debug] Invalid tool name detected:', tool.name);
+                console.error(' Invalid tool name detected:', tool.name);
                 throw new Error(`Invalid tool name "${tool.name}": only alphanumeric characters, hyphens, and underscores are allowed.`);
             }
         }
-        console.log('[HF Debug] Tool validation passed');
+        console.log('Tool validation passed');
     }
 
     private validateRequest(messages: readonly vscode.LanguageModelChatMessage[]): void {
-        console.log('[HF Debug] Validating request with', messages.length, 'messages');
+        console.log('Validating request with', messages.length, 'messages');
         const lastMessage = messages[messages.length - 1];
         if (!lastMessage) {
-            console.error('[HF Debug] No messages in request');
+            console.error('No messages in request');
             throw new Error('Invalid request: no messages.');
         }
 
@@ -562,7 +561,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                         .filter(part => part instanceof vscode.LanguageModelToolCallPart)
                         .map(part => (part as vscode.LanguageModelToolCallPart).callId)
                 );
-                console.log('[HF Debug] Message', i, 'has', toolCallIds.size, 'tool call IDs');
+                console.log(' Message', i, 'has', toolCallIds.size, 'tool call IDs');
                 if (toolCallIds.size === 0) {
                     return;
                 }
@@ -572,24 +571,24 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
                 while (toolCallIds.size > 0) {
                     const nextMessage = messages[nextMessageIdx++];
                     if (!nextMessage || nextMessage.role !== vscode.LanguageModelChatMessageRole.User) {
-                        console.error('[HF Debug] Validation failed: missing tool result for call IDs:', Array.from(toolCallIds));
+                        console.error('Validation failed: missing tool result for call IDs:', Array.from(toolCallIds));
                         throw new Error(errMsg);
                     }
 
                     nextMessage.content.forEach(part => {
                         if (!this.isToolResultPart(part)) {
                             const ctorName = (Object.getPrototypeOf(part as object) as { constructor?: { name?: string } } | undefined)?.constructor?.name ?? typeof part;
-                            console.error('[HF Debug] Validation failed: expected tool result part, got:', ctorName);
+                            console.error('Validation failed: expected tool result part, got:', ctorName);
                             throw new Error(errMsg);
                         }
                         const callId = (part as { callId: string }).callId;
-                        console.log('[HF Debug] Found matching tool result for call ID:', callId);
+                        console.log('Found matching tool result for call ID:', callId);
                         toolCallIds.delete(callId);
                     });
                 }
             }
         });
-        console.log('[HF Debug] Request validation passed');
+        console.log('Request validation passed');
     }
 
     private isToolResultPart(value: unknown): value is { callId: string; content?: ReadonlyArray<unknown> } {
