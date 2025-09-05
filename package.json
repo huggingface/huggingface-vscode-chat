@@ -1,0 +1,61 @@
+{
+	"name": "huggingface-vscode-chat",
+	"publisher": "huggingface",
+	"displayName": "Hugging Face Model Provider Extension for VS Code Chat",
+	"description": "Sample extension which provides chat models via the LM API.",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/huggingface/huggingface-vscode-chat"
+	},
+	"version": "0.1.0",
+	"engines": {
+		"vscode": "^1.104.0-20250828"
+	},
+	"categories": [
+		"AI",
+		"Chat"
+	],
+	"contributes": {
+		"languageModelChatProviders": [
+			{
+				"vendor": "huggingface",
+				"displayName": "Hugging Face",
+				"managementCommand": "huggingface.manage"
+			}
+		],
+		"commands": [
+			{
+				"command": "huggingface.manage",
+				"title": "Manage Hugging Face Provider"
+			}
+		]
+	},
+	"main": "./out/extension.js",
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"download-api": "dts dev",
+		"postdownload-api": "dts main",
+		"postinstall": "npm run download-api",
+		"compile": "tsc -p ./",
+		"lint": "eslint",
+		"format": "prettier --write .",
+		"watch": "tsc -watch -p ./",
+		"test": "pnpm run compile && vscode-test"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/node": "^22",
+		"@types/mocha": "^10.0.6",
+		"@vscode/dts": "^0.4.1",
+		"@types/vscode": "^1.103.0",
+		"@vscode/test-cli": "^0.0.11",
+		"@vscode/test-electron": "^2.5.2",
+		"eslint": "^9.13.0",
+		"prettier": "^3.1.0",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.39.0"
+	},
+	"packageManager": "pnpm@8.15.4+sha512.0bd3a9be9eb0e9a692676deec00a303ba218ba279d99241475616b398dbaeedd11146f92c2843458f557b1d127e09d4c171e105bdcd6b61002b39685a8016b9e"
+}
