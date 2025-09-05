@@ -105,7 +105,7 @@ export function validateTools(tools: readonly vscode.LanguageModelChatTool[]): v
 }
 
 /**
- * Validate that every assistant tool call is followed by a user tool result with matching callId.
+ * Validate the request message sequence for correct tool call/result pairing.
  * @param messages The full request message list.
  */
 export function validateRequest(messages: readonly vscode.LanguageModelChatRequestMessage[]): void {

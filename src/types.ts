@@ -1,11 +1,4 @@
 /**
- * Shared type definitions for the Hugging Face VS Code chat provider.
- */
-
-/** OpenAI-style chat roles. */
-export type OpenAIChatRole = 'system' | 'user' | 'assistant' | 'tool';
-
-/**
  * OpenAI function-call entry emitted by assistant messages.
  */
 export interface OpenAIToolCall {
@@ -75,3 +68,6 @@ export interface HFModelsResponse {
  * Buffer used to accumulate streamed tool call parts until arguments are valid JSON.
  */
 export interface ToolCallBuffer { id?: string; name?: string; args: string }
+
+/** OpenAI-style chat roles. */
+export type OpenAIChatRole = 'system' | 'user' | 'assistant' | 'tool';
