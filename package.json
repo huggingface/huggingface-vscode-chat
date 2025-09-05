@@ -38,6 +38,7 @@
 		"postinstall": "npm run download-api",
 		"compile": "tsc -p ./",
 		"lint": "eslint",
+		"format": "prettier --write .",
 		"watch": "tsc -watch -p ./",
 		"test": "pnpm run compile && vscode-test"
 	},
@@ -52,6 +53,7 @@
 		"@vscode/test-cli": "^0.0.11",
 		"@vscode/test-electron": "^2.5.2",
 		"eslint": "^9.13.0",
+		"prettier": "^3.1.0",
 		"typescript": "^5.9.2",
 		"typescript-eslint": "^8.39.0"
 	},

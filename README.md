@@ -7,10 +7,12 @@ This is based on the VS Code Language Model Chat Provider API. Learn more 👉 [
 ## Getting Started
 
 ### Prerequisites
+
 - VS Code 1.104 or higher. For dev, it's recommended to install [VS Code Insiders](https://code.visualstudio.com/insiders/).
 - Node.js and `npm` (or `pnpm`) installed
 
 ### Installation and Development
+
 1. Clone this repository
 2. Navigate to the extension directory:
    ```bash
@@ -28,10 +30,11 @@ This is based on the VS Code Language Model Chat Provider API. Learn more 👉 [
 6. The extension will be active and ready to provide chat models
 
 ### Building and Watching
+
 - Build once: `npm run compile`
 - Watch mode: `npm run watch` (automatically recompiles on file changes)
 - Lint code: `npm run lint`
-
+- Format code: `npm run format`
 
 ## Usage
 
