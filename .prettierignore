@@ -5,7 +5,6 @@ dist/**
 **/*.md
 **/*.yml
 **/*.json
-**/*vscode.d.ts
 **/*.mjs
-.simulation/**
+**/*vscode.d.ts
 .build/**
