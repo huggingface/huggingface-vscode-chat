@@ -28,6 +28,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		{ id?: string; name?: string; args: string }
 	>();
 
+	/** Indices for which a tool call has been fully emitted. */
+	private _completedToolCallIndices = new Set<number>();
+
 	/**
 	 * Create a provider using the given secret storage for the API key.
 	 * @param secrets VS Code secret storage.
@@ -170,6 +173,10 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		console.log("Starting chat response for model:", model.id);
 		console.log("Input messages:", messages.length);
 		console.log("Tool options:", options.tools ? options.tools.length : 0, "tools");
+
+		// Reset tool-call state for this request
+		this._toolCallBuffers.clear();
+		this._completedToolCallIndices.clear();
 
 		const apiKey = await this.ensureApiKey(true);
 		if (!apiKey) {
@@ -340,7 +347,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 					const data = line.slice(6);
 					if (data === "[DONE]") {
 						console.log(" Received [DONE] marker");
-						await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ true);
+						// Do not throw on [DONE]; any incomplete/empty buffers are ignored.
+						await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ false);
 						continue;
 					}
 
@@ -358,6 +366,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			}
 		} finally {
 			reader.releaseLock();
+			// Clean up any leftover tool call state
+			this._toolCallBuffers.clear();
+			this._completedToolCallIndices.clear();
 			console.log("Streaming response reader released");
 		}
 	}
@@ -384,28 +395,32 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			progress.report(new vscode.LanguageModelTextPart(content));
 		}
 
-		if (deltaObj?.tool_calls) {
-			const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
-			console.log("Processing tool calls:", toolCalls.length);
+			if (deltaObj?.tool_calls) {
+				const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
+				console.log("Processing tool calls:", toolCalls.length);
 
-			for (const tc of toolCalls) {
-				const idx = (tc.index as number) ?? 0;
-				const buf = this._toolCallBuffers.get(idx) ?? { args: "" };
-				if (tc.id && typeof tc.id === "string") {
-					buf.id = tc.id as string;
-				}
-				const func = tc.function as Record<string, unknown> | undefined;
-				if (func?.name && typeof func.name === "string") {
-					buf.name = func.name as string;
-				}
-				if (typeof func?.arguments === "string") {
-					buf.args += func.arguments as string;
-				}
-				this._toolCallBuffers.set(idx, buf);
+				for (const tc of toolCalls) {
+					const idx = (tc.index as number) ?? 0;
+					// Ignore any further deltas for an index we've already completed
+					if (this._completedToolCallIndices.has(idx)) {
+						continue;
+					}
+					const buf = this._toolCallBuffers.get(idx) ?? { args: "" };
+					if (tc.id && typeof tc.id === "string") {
+						buf.id = tc.id as string;
+					}
+					const func = tc.function as Record<string, unknown> | undefined;
+					if (func?.name && typeof func.name === "string") {
+						buf.name = func.name as string;
+					}
+					if (typeof func?.arguments === "string") {
+						buf.args += func.arguments as string;
+					}
+					this._toolCallBuffers.set(idx, buf);
 
-				await this.tryEmitBufferedToolCall(idx, progress);
-			}
-		} else {
+					await this.tryEmitBufferedToolCall(idx, progress);
+				}
+			} else {
 			console.log("No tool calls in this delta");
 		}
 
@@ -439,6 +454,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		const parameters = canParse.value;
 		progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, parameters));
 		this._toolCallBuffers.delete(index);
+		this._completedToolCallIndices.add(index);
 		console.log("Emitted buffered tool call:", { index, id, name: buf.name });
 	}
 
@@ -471,6 +487,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
 			console.log("Flushed buffered tool call:", { idx, id, name });
 			this._toolCallBuffers.delete(idx);
+			this._completedToolCallIndices.add(idx);
 		}
 	}
 }
