@@ -1,10 +1,10 @@
-## Hugging Face Inference Providers for VS Code Copilot
+## 🤗 Hugging Face Inference Providers for VS Code Copilot
 
 ![Demo](assets/demo.gif)
 
 Bring thousands of open‑source models to VS Code Copilot Chat with a first‑class provider powered by [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) and built on the [Language Model Chat Provider API](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider).
 
-### Why use the Hugging Face provider in Copilot
+### ✨ Why use the Hugging Face provider in Copilot
 - 4k+ open‑source LLMs with tool calling capabilities.
 - Single API to thousands of open‑source LLMs via providers like Groq, Cerebras, Together AI, SambaNova, and more.
 - Built for high availability and low latency through world‑class providers.
@@ -12,7 +12,7 @@ Bring thousands of open‑source models to VS Code Copilot Chat with a first‑c
 
 ---
 
-## Quick start
+## ⚡ Quick start
 1. Open VS Code's chat interface.
 2. Click the model picker and click "Manage Models...".
 3. Select "Hugging Face" provider.
@@ -20,9 +20,11 @@ Bring thousands of open‑source models to VS Code Copilot Chat with a first‑c
 5. Select the models you want to add to the model picker.
 
 💡 The free tier gives you monthly inference credits to start building and experimenting. Upgrade to [Hugging Face PRO](https://huggingface.co/pro) for even more flexibility, $2 in monthly credits plus pay‑as‑you‑go access to all providers!
+
+
 ---
 
-## Development
+## 🛠️ Development
 ```bash
 git clone https://github.com/huggingface/huggingface-vscode-chat
 cd huggingface-vscode-chat
@@ -39,7 +41,7 @@ Common scripts:
 
 ---
 
-## Learn more
+## 📚 Learn more
 - Inference Providers overview: https://huggingface.co/docs/inference-providers/index
 - VS Code Chat Provider API: https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider
 
