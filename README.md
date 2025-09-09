@@ -42,7 +42,7 @@ Common scripts:
 ---
 
 ## 📚 Learn more
-- Inference Providers overview: https://huggingface.co/docs/inference-providers/index
+- Inference Providers documentation: https://huggingface.co/docs/inference-providers/index
 - VS Code Chat Provider API: https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider
 
 ---
