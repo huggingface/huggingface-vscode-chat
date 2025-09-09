@@ -174,7 +174,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		console.log("Input messages:", messages.length);
 		console.log("Tool options:", options.tools ? options.tools.length : 0, "tools");
 
-		// Reset tool-call state for this request
+		// Reset tool call state for this request
 		this._toolCallBuffers.clear();
 		this._completedToolCallIndices.clear();
 

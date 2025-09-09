@@ -1,48 +1,50 @@
-# Hugging Face Inference Providers Chat Extension for VS Code
+## Hugging Face Inference Providers for VS Code Copilot
 
-This extension contributes a Chat Model Provider powered by [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) for VS Code Chat.
+![Demo](assets/demo.gif)
 
-This is based on the VS Code Language Model Chat Provider API. Learn more 👉 [here](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider)
+Bring thousands of open‑source models to VS Code Copilot Chat with a first‑class provider powered by [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) and built on the [Language Model Chat Provider API](https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider).
 
-## Getting Started
+### Why use the Hugging Face provider in Copilot
+- 4k+ open‑source LLMs with tool calling capabilities.
+- Single API to thousands of open‑source LLMs via providers like Groq, Cerebras, Together AI, SambaNova, and more.
+- Built for high availability and low latency through world‑class providers.
+- No extra markup on provider rates.
 
-### Prerequisites
+---
 
-- VS Code 1.104 or higher. For dev, it's recommended to install [VS Code Insiders](https://code.visualstudio.com/insiders/).
-- Node.js and `npm` (or `pnpm`) installed
+## Quick start
+1. Open VS Code's chat interface.
+2. Click the model picker and click "Manage Models...".
+3. Select "Hugging Face" provider.
+4. Provide your Hugging Face Token, you can get one in your [settings page](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained).
+5. Select the models you want to add to the model picker.
 
-### Installation and Development
+💡 The free tier gives you monthly inference credits to start building and experimenting. Upgrade to [Hugging Face PRO](https://huggingface.co/pro) for even more flexibility, $2 in monthly credits plus pay‑as‑you‑go access to all providers!
+---
 
-1. Clone this repository
-2. Navigate to the extension directory:
-   ```bash
-   cd huggingface-vscode-chat
-   ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Compile the extension:
-   ```bash
-   npm run compile
-   ```
-5. Press F5 to launch a new Extension Development Host window
-6. The extension will be active and ready to provide chat models
+## Development
+```bash
+git clone https://github.com/huggingface/huggingface-vscode-chat
+cd huggingface-vscode-chat
+npm install
+npm run compile
+```
+Press F5 to launch an Extension Development Host.
 
-### Building and Watching
+Common scripts:
+- Build: `npm run compile`
+- Watch: `npm run watch`
+- Lint: `npm run lint`
+- Format: `npm run format`
 
-- Build once: `npm run compile`
-- Watch mode: `npm run watch` (automatically recompiles on file changes)
-- Lint code: `npm run lint`
-- Format code: `npm run format`
+---
 
-## Usage
+## Learn more
+- Inference Providers overview: https://huggingface.co/docs/inference-providers/index
+- VS Code Chat Provider API: https://code.visualstudio.com/api/extension-guides/ai/language-model-chat-provider
 
-Once the extension is active:
+---
 
-- Open VS Code's chat interface.
-- Click the model picker and click "Manage Models..."
-- Select the Hugging Face provider.
-- Provide your Hugging Face token.
-- Select the models you want to add to the model picker.
-- You're all set!
+## Support & License
+- Open issues: https://github.com/huggingface/huggingface-vscode-chat/issues
+- License: MIT License Copyright (c) 2025 Hugging Face
