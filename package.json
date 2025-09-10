@@ -2,12 +2,12 @@
 	"name": "huggingface-vscode-chat",
 	"publisher": "huggingface",
 	"displayName": "Hugging Face Model Provider Extension for VS Code Chat",
-	"description": "Sample extension which provides chat models via the LM API.",
+	"description": "An extension that integrates Hugging Face Inference Providers into VS Code Chat.",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/huggingface/huggingface-vscode-chat"
 	},
-	"version": "0.1.0",
+	"version": "0.0.1",
 	"engines": {
 		"vscode": "^1.104.0-20250828"
 	},

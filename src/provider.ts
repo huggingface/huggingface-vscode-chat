@@ -1,7 +1,4 @@
 import * as vscode from "vscode";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 import {
 	CancellationToken,
 	LanguageModelChatInformation,
@@ -12,7 +9,7 @@ import {
 	Progress,
 } from "vscode";
 
-import type { HFModelItem, HFModelsResponse, HFExtraModelInfo } from "./types";
+import type { HFModelItem, HFModelsResponse } from "./types";
 
 import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 
@@ -40,6 +37,30 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 */
 	constructor(private readonly secrets: vscode.SecretStorage) {}
 
+	/** Roughly estimate tokens for VS Code chat messages (text only). */
+	private estimateMessagesTokens(msgs: readonly vscode.LanguageModelChatMessage[]): number {
+		let total = 0;
+		for (const m of msgs) {
+			for (const part of m.content) {
+				if (part instanceof vscode.LanguageModelTextPart) {
+					total += Math.ceil(part.value.length / 4);
+				}
+			}
+		}
+		return total;
+	}
+
+	/** Rough token estimate for tool definitions by JSON size. */
+	private estimateToolTokens(tools: { type: string; function: { name: string; description?: string; parameters?: object } }[] | undefined): number {
+		if (!tools || tools.length === 0) { return 0; }
+		try {
+			const json = JSON.stringify(tools);
+			return Math.ceil(json.length / 4);
+		} catch {
+			return 0;
+		}
+	}
+
 	/**
 	 * Get the list of available language models contributed by this provider
 	 * @param options Options which specify the calling context of this function
@@ -55,12 +76,12 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			return [];
 		}
 
-		const { models, hfInfoMap } = await this.fetchModels(apiKey);
+		const { models } = await this.fetchModels(apiKey);
 
 		const infos: LanguageModelChatInformation[] = models.flatMap((m) => {
 			const providers = m?.providers ?? [];
-			const hfInfo = hfInfoMap.get(m.id);
-			const vision = hfInfo?.pipeline_tag === "image-text-to-text";
+			const modalities = m.architecture?.input_modalities ?? [];
+			const vision = Array.isArray(modalities) && modalities.includes("image");
 
 			// Build entries for all providers that support tool calling
 			const toolProviders = providers.filter((p) => p.supports_tools === true);
@@ -130,60 +151,37 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 */
 	private async fetchModels(
 		apiKey: string
-	): Promise<{ models: HFModelItem[]; hfInfoMap: Map<string, HFExtraModelInfo> }> {
-		const modelsList = (async () => {
-			const resp = await fetch(`${BASE_URL}/models`, {
-				method: "GET",
-				headers: { Authorization: `Bearer ${apiKey}` },
-			});
-			if (!resp.ok) {
-				let text = "";
-				try {
-					text = await resp.text();
-				} catch (error) {
-					console.error("Failed to read response text:", error);
-				}
-				const err = new Error(
-					`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ""}`
-				);
-				const logPath = await this.logErrorToFile("GET /models", undefined, err);
-				console.error("Saved error log:", logPath);
-				throw err;
-			}
-			const parsed = (await resp.json()) as HFModelsResponse;
-			return parsed.data ?? [];
-		})();
-
-		const ModelsInfo = (async () => {
-			const map = new Map<string, HFExtraModelInfo>();
-			try {
-				const resp = await fetch("https://huggingface.co/api/models?other=conversational&inference=warm", {
+	): Promise<{ models: HFModelItem[] }> {
+			const modelsList = (async () => {
+				const resp = await fetch(`${BASE_URL}/models`, {
 					method: "GET",
+					headers: { Authorization: `Bearer ${apiKey}` },
 				});
 				if (!resp.ok) {
-					return map;
-				}
-				const arr = (await resp.json()) as HFExtraModelInfo[];
-				for (const item of arr) {
-					if (item?.id) {
-						map.set(item.id, item);
+					let text = "";
+					try {
+						text = await resp.text();
+					} catch (error) {
+						console.error("Failed to read response text:", error);
 					}
+					const err = new Error(
+						`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ""}`
+					);
+					console.error("Failed to fetch Hugging Face models:", err);
+					throw err;
 				}
-			} catch (error) {
-				console.error("Failed to fetch Hugging Face model metadata:", error);
-			}
-			return map;
-		})();
+				const parsed = (await resp.json()) as HFModelsResponse;
+				return parsed.data ?? [];
+			})();
 
-		try {
-			const [models, infos] = await Promise.all([modelsList, ModelsInfo]);
-			return { models, hfInfoMap: infos };
-		} catch (err) {
-			const logPath = await this.logErrorToFile("/models aggregate", undefined, err);
-			console.error("Saved error log:", logPath);
-			throw err;
+			try {
+				const models = await modelsList;
+				return { models };
+			} catch (err) {
+				console.error("Failed to fetch Hugging Face models:", err);
+				throw err;
+			}
 		}
-	}
 
 	/**
 	 * Returns the response for a chat request, passing the results to the progress callback.
@@ -202,9 +200,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		progress: Progress<LanguageModelResponsePart>,
 		token: CancellationToken
 	): Promise<void> {
-		console.log("Starting chat response for model:", model.id);
-		console.log("Input messages:", messages.length);
-		console.log("Tool options:", options.tools ? options.tools.length : 0, "tools");
+        // minimal logging: avoid verbose info logs
 
 		// Reset tool call state for this request
 		this._toolCallBuffers.clear();
@@ -218,33 +214,36 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			}
 
 			// Convert messages to OpenAI format
-			const openaiMessages = convertMessages(messages);
-			console.log("Converted messages:", openaiMessages.length);
+            const openaiMessages = convertMessages(messages);
 
 			// Validate the request structure
 			validateRequest(messages);
 
 			// Convert tools if present
-			const toolConfig = convertTools(options);
-			console.log("Tool config:", {
-				hasTools: !!toolConfig.tools,
-				toolCount: toolConfig.tools?.length || 0,
-				toolChoice: toolConfig.tool_choice,
-			});
+            const toolConfig = convertTools(options);
 
 		// Copilot parity: limit number of tools
-		if (options.tools && options.tools.length > 128) {
-			throw new Error("Cannot have more than 128 tools per request.");
-		}
+        if (options.tools && options.tools.length > 128) {
+            throw new Error("Cannot have more than 128 tools per request.");
+        }
 
-			// Prepare request body
-			requestBody = {
-				model: model.id,
-				messages: openaiMessages,
-				stream: true,
-				max_tokens: options.modelOptions?.max_tokens || 4096,
-				temperature: options.modelOptions?.temperature ?? 0.7,
-			};
+            // Preflight token budget (approximate)
+            const inputTokenCount = this.estimateMessagesTokens(messages);
+            const toolTokenCount = this.estimateToolTokens(toolConfig.tools);
+            const tokenLimit = Math.max(1, model.maxInputTokens);
+            if (inputTokenCount + toolTokenCount > tokenLimit) {
+                console.error("Message exceeds token limit", { total: inputTokenCount + toolTokenCount, tokenLimit });
+                throw new Error("Message exceeds token limit.");
+            }
+
+            // Prepare request body
+            requestBody = {
+                model: model.id,
+                messages: openaiMessages,
+                stream: true,
+                max_tokens: Math.min(options.modelOptions?.max_tokens || 4096, model.maxOutputTokens),
+                temperature: options.modelOptions?.temperature ?? 0.7,
+            };
 
 			// Allow-list model options
 			if (options.modelOptions) {
@@ -267,18 +266,14 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
 			}
 
-			console.log("Request body:", JSON.stringify(requestBody, null, 2));
-
-			const response = await fetch(`${BASE_URL}/chat/completions`, {
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${apiKey}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify(requestBody),
-			});
-
-			console.log("HF API response status:", response.status);
+            const response = await fetch(`${BASE_URL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(requestBody),
+            });
 
 			if (!response.ok) {
 				const errorText = await response.text();
@@ -291,39 +286,13 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			if (!response.body) {
 				throw new Error("No response body from Hugging Face API");
 			}
-
-			// Optional raw stream logger
-			let streamWriter: fs.WriteStream | undefined;
-			let streamLogPath = "";
-			if (this.shouldLogStream()) {
-				const dir = path.join(os.tmpdir(), "hf-vscode-chat-logs");
-				await fs.promises.mkdir(dir, { recursive: true });
-				const ts = new Date().toISOString().replace(/[:]/g, "-");
-				streamLogPath = path.join(
-					dir,
-					`${ts}-${Math.random().toString(36).slice(2, 8)}-stream.log`
-				);
-				streamWriter = fs.createWriteStream(streamLogPath, { flags: "a" });
-				streamWriter.write(
-					`{"subject":"STREAM /chat/completions","timestamp":"${new Date().toISOString()}","model":"${model.id}","note":"Raw SSE lines follow"}\n`
-				);
-				console.log("Streaming response log:", streamLogPath);
-			}
-
-			try {
-				await this.processStreamingResponse(response.body, progress, token, streamWriter);
-			} finally {
-				if (streamWriter) {
-					await new Promise((resolve) => streamWriter?.end(resolve));
-					console.log("Closed stream log:", streamLogPath);
-				}
-			}
+			await this.processStreamingResponse(response.body, progress, token);
 		} catch (err) {
-			const logPath = await this.logErrorToFile("POST /chat/completions", requestBody, err, {
+			console.error("Chat request failed", {
 				modelId: model.id,
 				messageCount: messages.length,
+				error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
 			});
-			console.error("Saved error log:", logPath);
 			throw err;
 		}
 	}
@@ -380,64 +349,53 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 * @param progress Progress reporter for streamed parts.
 	 * @param token Cancellation token.
 	 */
-	private async processStreamingResponse(
-		responseBody: ReadableStream<Uint8Array>,
-		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-		token: vscode.CancellationToken,
-		streamLog?: fs.WriteStream
-	): Promise<void> {
-		console.log("Starting streaming response processing");
-		const reader = responseBody.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
+    private async processStreamingResponse(
+        responseBody: ReadableStream<Uint8Array>,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+        token: vscode.CancellationToken,
+    ): Promise<void> {
+        const reader = responseBody.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
 		try {
 			while (!token.isCancellationRequested) {
 				const { done, value } = await reader.read();
-				if (done) {
-					console.log(" Streaming response complete");
-					break;
-				}
+                if (done) { break; }
 
 				buffer += decoder.decode(value, { stream: true });
 				const lines = buffer.split("\n");
 				buffer = lines.pop() || "";
 
 				for (const line of lines) {
-					if (streamLog) {
-						try { streamLog.write(line + "\n"); } catch {/* ignore */}
-					}
 					if (!line.startsWith("data: ")) {
 						continue;
 					}
 					const data = line.slice(6);
-					if (data === "[DONE]") {
-						console.log(" Received [DONE] marker");
-						// Do not throw on [DONE]; any incomplete/empty buffers are ignored.
-						await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ false);
-						continue;
-					}
+                    if (data === "[DONE]") {
+                        // Do not throw on [DONE]; any incomplete/empty buffers are ignored.
+                        await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ false);
+                        continue;
+                    }
 
 					try {
 						const parsed = JSON.parse(data);
-						console.log(" Processing chunk:", {
-							hasChoices: !!parsed.choices,
-							choiceCount: parsed.choices?.length || 0,
-						});
-						await this.processDelta(parsed, progress);
-					} catch (parseError) {
-						console.warn(" Failed to parse SSE chunk:", parseError, "Raw data:", data.substring(0, 200));
-					}
-				}
-			}
-		} finally {
-			reader.releaseLock();
-			// Clean up any leftover tool call state
-			this._toolCallBuffers.clear();
-			this._completedToolCallIndices.clear();
-			console.log("Streaming response reader released");
-		}
-	}
+                        await this.processDelta(parsed, progress);
+                    } catch (parseError) {
+                        console.warn("Failed to parse SSE chunk", {
+                            error: parseError instanceof Error ? parseError.message : String(parseError),
+                            dataSnippet: data.slice(0, 200),
+                        });
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+            // Clean up any leftover tool call state
+            this._toolCallBuffers.clear();
+            this._completedToolCallIndices.clear();
+        }
+    }
 
 	/**
 	 * Handle a single streamed delta chunk, emitting text and tool call parts.
@@ -449,21 +407,16 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>
 	): Promise<void> {
 		const choice = (delta.choices as Record<string, unknown>[] | undefined)?.[0];
-		if (!choice) {
-			console.log("No choices in delta");
-			return;
-		}
+        if (!choice) { return; }
 
 		const deltaObj = choice.delta as Record<string, unknown> | undefined;
 		if (deltaObj?.content) {
-			const content = deltaObj.content as string;
-			console.log("Processing text delta:", content.substring(0, 100) + (content.length > 100 ? "..." : ""));
-			progress.report(new vscode.LanguageModelTextPart(content));
+            const content = deltaObj.content as string;
+            progress.report(new vscode.LanguageModelTextPart(content));
 		}
 
 			if (deltaObj?.tool_calls) {
-				const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
-				console.log("Processing tool calls:", toolCalls.length);
+                const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
 
 				for (const tc of toolCalls) {
 					const idx = (tc.index as number) ?? 0;
@@ -486,9 +439,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
 					await this.tryEmitBufferedToolCall(idx, progress);
 				}
-			} else {
-			console.log("No tool calls in this delta");
-		}
+            }
 
 		const finish = (choice.finish_reason as string | undefined) ?? undefined;
 		if (finish === "tool_calls" || finish === "stop") {
@@ -520,8 +471,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		const parameters = canParse.value;
 		progress.report(new vscode.LanguageModelToolCallPart(id, buf.name, parameters));
 		this._toolCallBuffers.delete(index);
-		this._completedToolCallIndices.add(index);
-		console.log("Emitted buffered tool call:", { index, id, name: buf.name });
+        this._completedToolCallIndices.add(index);
 	}
 
 	/**
@@ -540,89 +490,17 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			const parsed = tryParseJSONObject(buf.args);
 			if (!parsed.ok) {
 				if (throwOnInvalid) {
-					console.error("Final tool call arguments are not valid JSON:", {
-						idx,
-						snippet: (buf.args || "").slice(0, 200),
-					});
+					console.error("Invalid JSON for tool call", { idx, snippet: (buf.args || "").slice(0, 200) });
 					throw new Error("Invalid JSON for tool call");
 				}
 				continue;
 			}
 			const id = buf.id ?? `call_${Math.random().toString(36).slice(2, 10)}`;
 			const name = buf.name ?? "unknown_tool";
-			progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
-			console.log("Flushed buffered tool call:", { idx, id, name });
+            progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
 			this._toolCallBuffers.delete(idx);
 			this._completedToolCallIndices.add(idx);
 		}
 	}
 
-	/**
-	 * Write an error log file with the request payload (if available) and error details.
-	 * Returns the path to the saved file or an empty string on failure.
-	 */
-	private async logErrorToFile(
-		subject: string,
-		payload: unknown | undefined,
-		error: unknown,
-		extra?: Record<string, unknown>
-	): Promise<string> {
-		try {
-			const dir = path.join(os.tmpdir(), "hf-vscode-chat-logs");
-			await fs.promises.mkdir(dir, { recursive: true });
-			const ts = new Date().toISOString().replace(/[:]/g, "-");
-			const filename = `${ts}-${Math.random().toString(36).slice(2, 8)}.json`;
-			const filePath = path.join(dir, filename);
-
-			const errObj: { name?: string; message?: string; stack?: string } = {};
-			if (error && typeof error === "object") {
-				const e = error as Error;
-				errObj.name = e.name;
-				errObj.message = e.message;
-				errObj.stack = e.stack;
-			} else if (typeof error === "string") {
-				errObj.message = error;
-			}
-
-			// attempt to deep-clone and redact sensitive fields
-			const safePayload = (() => {
-				try {
-					if (!payload) {
-						return undefined;
-					}
-					const clone = JSON.parse(JSON.stringify(payload));
-					if (clone && typeof clone === "object") {
-						for (const key of Object.keys(clone)) {
-							if (/api[-_]?key|authorization|token/i.test(key)) {
-								(clone as Record<string, unknown>)[key] = "[REDACTED]";
-							}
-						}
-					}
-					return clone;
-				} catch {
-					return undefined;
-				}
-			})();
-
-			const toWrite = {
-				subject,
-				timestamp: new Date().toISOString(),
-				payload: safePayload,
-				error: errObj,
-				extra,
-			};
-
-			await fs.promises.writeFile(filePath, JSON.stringify(toWrite, null, 2), "utf8");
-			return filePath;
-		} catch (e) {
-			console.error("Failed to write error log:", e);
-			return "";
-		}
-	}
-
-	/** Enable raw streaming logs when env var is set. */
-	private shouldLogStream(): boolean {
-		const val = (process.env.HF_LOG_STREAM || "").toLowerCase();
-		return val === "1" || val === "true" || val === "yes";
-	}
 }

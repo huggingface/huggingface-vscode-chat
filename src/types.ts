@@ -40,20 +40,27 @@ export interface HFProvider {
 /**
  * A model entry returned by the Hugging Face router models endpoint.
  */
+export interface HFArchitecture {
+    input_modalities?: string[];
+    output_modalities?: string[];
+}
+
 export interface HFModelItem {
-	id: string;
-	object: string;
-	created: number;
-	owned_by: string;
-	providers: HFProvider[];
+    id: string;
+    object: string;
+    created: number;
+    owned_by: string;
+    providers: HFProvider[];
+    architecture?: HFArchitecture;
 }
 
 /**
  * Supplemental model info from the Hugging Face hub API.
  */
+// Deprecated: extra model info was previously fetched from the hub API
 export interface HFExtraModelInfo {
-	id: string;
-	pipeline_tag?: string;
+    id: string;
+    pipeline_tag?: string;
 }
 
 /**
