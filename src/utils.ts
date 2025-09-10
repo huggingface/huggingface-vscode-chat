@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { OpenAIChatMessage, OpenAIChatRole, OpenAIFunctionToolDef, OpenAIToolCall } from "./types";
 
-// ---- Tool sanitization helpers (parity with Python snippet) ----
+// Tool calling sanitization helpers
 
 function isIntegerLikePropertyName(propertyName: string | undefined): boolean {
     if (!propertyName){
@@ -199,7 +199,6 @@ export function convertTools(options: vscode.LanguageModelChatRequestHandleOptio
 	}
 
 	const toolDefs: OpenAIFunctionToolDef[] = tools
-		// VS Code tools are implicitly function tools; skip if malformed object
 		.filter((t) => t && typeof t === "object")
 		.map((t) => {
 			const name = sanitizeFunctionName(t.name);

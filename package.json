@@ -3,6 +3,7 @@
 	"publisher": "huggingface",
 	"displayName": "Hugging Face Model Provider Extension for VS Code Chat",
 	"description": "An extension that integrates Hugging Face Inference Providers into VS Code Chat.",
+	"icon": "assets/small_logo.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/huggingface/huggingface-vscode-chat"
@@ -15,6 +16,27 @@
 		"AI",
 		"Chat"
 	],
+	"galleryBanner": {
+		"color": "#100f11",
+		"theme": "dark"
+	},
+	"badges": [
+		{
+		"url": "https://img.shields.io/github/stars/huggingface/huggingface-vscode-chat?style=social",
+		"description": "Star huggingface-vscode-chat on Github",
+		"href": "https://github.com/huggingface/huggingface-vscode-chat"
+		},
+		{
+		"url": "https://img.shields.io/twitter/follow/huggingface?style=social",
+		"description": "Follow Hugging Face on Twitter",
+		"href": "https://x.com/huggingface"
+		}
+	],
+	"homepage": "https://huggingface.co/docs/inference-providers/en/index",
+	"bugs": {
+		"url": "https://github.com/huggingface/huggingface-vscode-chat/issues"
+	},
+	"license": "MIT",
 	"contributes": {
 		"languageModelChatProviders": [
 			{
