@@ -1,6 +1,6 @@
 {
 	"name": "huggingface-vscode-chat",
-	"publisher": "huggingface",
+	"publisher": "HuggingFace",
 	"displayName": "Hugging Face Model Provider Extension for VS Code Chat",
 	"description": "An extension that integrates Hugging Face Inference Providers into VS Code Chat.",
 	"icon": "assets/small_logo.png",
