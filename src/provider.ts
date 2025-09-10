@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
 	CancellationToken,
 	LanguageModelChatInformation,
@@ -11,7 +14,7 @@ import {
 
 import type { HFModelItem, HFModelsResponse, HFExtraModelInfo } from "./types";
 
-import { convertTools, convertMessages, tryParseJSONObject, validateTools, validateRequest } from "./utils";
+import { convertTools, convertMessages, tryParseJSONObject, validateRequest } from "./utils";
 
 const BASE_URL = "https://router.huggingface.co/v1";
 const DEFAULT_MAX_OUTPUT_TOKENS = 16000;
@@ -54,36 +57,56 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 
 		const { models, hfInfoMap } = await this.fetchModels(apiKey);
 
-		const infos: LanguageModelChatInformation[] = models.map((m) => {
+		const infos: LanguageModelChatInformation[] = models.flatMap((m) => {
 			const providers = m?.providers ?? [];
-			// Select the first provider that explicitly supports tools
-			const toolProvider = providers.find((p) => p.supports_tools === true);
-			const baseProvider = providers[0];
-
-			const chosen = toolProvider ?? baseProvider;
-			const contextLen = chosen?.context_length ?? DEFAULT_CONTEXT_LENGTH;
-			const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
-			const maxInput = Math.max(1, contextLen - maxOutput);
-			const toolCalling = !!toolProvider; // only true if an explicit tools provider exists
 			const hfInfo = hfInfoMap.get(m.id);
 			const vision = hfInfo?.pipeline_tag === "image-text-to-text";
 
-			const id = toolProvider ? `${m.id}:${toolProvider.provider}` : m.id;
-			const tooltip = toolProvider ? `Hugging Face via ${toolProvider.provider}` : "Hugging Face";
+			// Build entries for all providers that support tool calling
+			const toolProviders = providers.filter((p) => p.supports_tools === true);
+			const entries: LanguageModelChatInformation[] = [];
 
-			return {
-				id,
-				name: m.id,
-				tooltip,
-				family: "huggingface",
-				version: "1.0.0",
-				maxInputTokens: maxInput,
-				maxOutputTokens: maxOutput,
-				capabilities: {
-					toolCalling,
-					imageInput: vision,
-				},
-			} satisfies LanguageModelChatInformation;
+			for (const p of toolProviders) {
+				const contextLen = p?.context_length ?? DEFAULT_CONTEXT_LENGTH;
+				const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
+				const maxInput = Math.max(1, contextLen - maxOutput);
+				entries.push({
+					id: `${m.id}:${p.provider}`,
+					name: m.id,
+					tooltip: `Hugging Face via ${p.provider}`,
+					family: "huggingface",
+					version: "1.0.0",
+					maxInputTokens: maxInput,
+					maxOutputTokens: maxOutput,
+					capabilities: {
+						toolCalling: true,
+						imageInput: vision,
+					},
+				} satisfies LanguageModelChatInformation);
+			}
+
+			// If no tool-capable providers exist, include a single non-tool entry as fallback
+			if (entries.length === 0 && providers.length > 0) {
+				const base = providers[0];
+				const contextLen = base?.context_length ?? DEFAULT_CONTEXT_LENGTH;
+				const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
+				const maxInput = Math.max(1, contextLen - maxOutput);
+				entries.push({
+					id: m.id,
+					name: m.id,
+					tooltip: "Hugging Face",
+					family: "huggingface",
+					version: "1.0.0",
+					maxInputTokens: maxInput,
+					maxOutputTokens: maxOutput,
+					capabilities: {
+						toolCalling: false,
+						imageInput: vision,
+					},
+				} satisfies LanguageModelChatInformation);
+			}
+
+			return entries;
 		});
 
 		this._chatEndpoints = infos.map((info) => ({
@@ -120,9 +143,12 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				} catch (error) {
 					console.error("Failed to read response text:", error);
 				}
-				throw new Error(
+				const err = new Error(
 					`Failed to fetch Hugging Face models: ${resp.status} ${resp.statusText}${text ? `\n${text}` : ""}`
 				);
+				const logPath = await this.logErrorToFile("GET /models", undefined, err);
+				console.error("Saved error log:", logPath);
+				throw err;
 			}
 			const parsed = (await resp.json()) as HFModelsResponse;
 			return parsed.data ?? [];
@@ -149,8 +175,14 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			return map;
 		})();
 
-		const [models, infos] = await Promise.all([modelsList, ModelsInfo]);
-		return { models, hfInfoMap: infos };
+		try {
+			const [models, infos] = await Promise.all([modelsList, ModelsInfo]);
+			return { models, hfInfoMap: infos };
+		} catch (err) {
+			const logPath = await this.logErrorToFile("/models aggregate", undefined, err);
+			console.error("Saved error log:", logPath);
+			throw err;
+		}
 	}
 
 	/**
@@ -178,92 +210,122 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		this._toolCallBuffers.clear();
 		this._completedToolCallIndices.clear();
 
-		const apiKey = await this.ensureApiKey(true);
-		if (!apiKey) {
-			throw new Error("Hugging Face API key not found");
-		}
+		let requestBody: Record<string, unknown> | undefined;
+		try {
+			const apiKey = await this.ensureApiKey(true);
+			if (!apiKey) {
+				throw new Error("Hugging Face API key not found");
+			}
 
-		// Convert messages to OpenAI format
-		const openaiMessages = convertMessages(messages);
-		console.log("Converted messages:", openaiMessages.length);
+			// Convert messages to OpenAI format
+			const openaiMessages = convertMessages(messages);
+			console.log("Converted messages:", openaiMessages.length);
 
-		// Validate the request structure
-		validateRequest(messages);
+			// Validate the request structure
+			validateRequest(messages);
 
-		// Convert tools if present
-		const toolConfig = convertTools(options);
-		console.log("Tool config:", {
-			hasTools: !!toolConfig.tools,
-			toolCount: toolConfig.tools?.length || 0,
-			toolChoice: toolConfig.tool_choice,
-		});
-
-		// Validate tools if present
-		if (options.tools && options.tools.length > 0) {
-			validateTools(options.tools);
-		}
+			// Convert tools if present
+			const toolConfig = convertTools(options);
+			console.log("Tool config:", {
+				hasTools: !!toolConfig.tools,
+				toolCount: toolConfig.tools?.length || 0,
+				toolChoice: toolConfig.tool_choice,
+			});
 
 		// Copilot parity: limit number of tools
 		if (options.tools && options.tools.length > 128) {
 			throw new Error("Cannot have more than 128 tools per request.");
 		}
 
-		// Prepare request body
-		const requestBody: Record<string, unknown> = {
-			model: model.id,
-			messages: openaiMessages,
-			stream: true,
-			max_tokens: options.modelOptions?.max_tokens || 4096,
-			temperature: options.modelOptions?.temperature ?? 0.7,
-		};
+			// Prepare request body
+			requestBody = {
+				model: model.id,
+				messages: openaiMessages,
+				stream: true,
+				max_tokens: options.modelOptions?.max_tokens || 4096,
+				temperature: options.modelOptions?.temperature ?? 0.7,
+			};
 
-		// Allow-list model options
-		if (options.modelOptions) {
-			const mo = options.modelOptions as Record<string, unknown>;
-			if (typeof mo.stop === "string" || Array.isArray(mo.stop)) {
-				requestBody.stop = mo.stop;
+			// Allow-list model options
+			if (options.modelOptions) {
+				const mo = options.modelOptions as Record<string, unknown>;
+				if (typeof mo.stop === "string" || Array.isArray(mo.stop)) {
+					(requestBody as Record<string, unknown>).stop = mo.stop;
+				}
+				if (typeof mo.frequency_penalty === "number") {
+					(requestBody as Record<string, unknown>).frequency_penalty = mo.frequency_penalty;
+				}
+				if (typeof mo.presence_penalty === "number") {
+					(requestBody as Record<string, unknown>).presence_penalty = mo.presence_penalty;
+				}
 			}
-			if (typeof mo.frequency_penalty === "number") {
-				requestBody.frequency_penalty = mo.frequency_penalty;
+
+			if (toolConfig.tools) {
+				(requestBody as Record<string, unknown>).tools = toolConfig.tools;
 			}
-			if (typeof mo.presence_penalty === "number") {
-				requestBody.presence_penalty = mo.presence_penalty;
+			if (toolConfig.tool_choice) {
+				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
 			}
+
+			console.log("Request body:", JSON.stringify(requestBody, null, 2));
+
+			const response = await fetch(`${BASE_URL}/chat/completions`, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${apiKey}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(requestBody),
+			});
+
+			console.log("HF API response status:", response.status);
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				console.error("HF API error response:", errorText);
+				throw new Error(
+					`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ""}`
+				);
+			}
+
+			if (!response.body) {
+				throw new Error("No response body from Hugging Face API");
+			}
+
+			// Optional raw stream logger
+			let streamWriter: fs.WriteStream | undefined;
+			let streamLogPath = "";
+			if (this.shouldLogStream()) {
+				const dir = path.join(os.tmpdir(), "hf-vscode-chat-logs");
+				await fs.promises.mkdir(dir, { recursive: true });
+				const ts = new Date().toISOString().replace(/[:]/g, "-");
+				streamLogPath = path.join(
+					dir,
+					`${ts}-${Math.random().toString(36).slice(2, 8)}-stream.log`
+				);
+				streamWriter = fs.createWriteStream(streamLogPath, { flags: "a" });
+				streamWriter.write(
+					`{"subject":"STREAM /chat/completions","timestamp":"${new Date().toISOString()}","model":"${model.id}","note":"Raw SSE lines follow"}\n`
+				);
+				console.log("Streaming response log:", streamLogPath);
+			}
+
+			try {
+				await this.processStreamingResponse(response.body, progress, token, streamWriter);
+			} finally {
+				if (streamWriter) {
+					await new Promise((resolve) => streamWriter?.end(resolve));
+					console.log("Closed stream log:", streamLogPath);
+				}
+			}
+		} catch (err) {
+			const logPath = await this.logErrorToFile("POST /chat/completions", requestBody, err, {
+				modelId: model.id,
+				messageCount: messages.length,
+			});
+			console.error("Saved error log:", logPath);
+			throw err;
 		}
-
-		if (toolConfig.tools) {
-			requestBody.tools = toolConfig.tools;
-		}
-		if (toolConfig.tool_choice) {
-			requestBody.tool_choice = toolConfig.tool_choice;
-		}
-
-		console.log("Request body:", JSON.stringify(requestBody, null, 2));
-
-		const response = await fetch(`${BASE_URL}/chat/completions`, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(requestBody),
-		});
-
-		console.log("HF API response status:", response.status);
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			console.error("HF API error response:", errorText);
-			throw new Error(
-				`Hugging Face API error: ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ""}`
-			);
-		}
-
-		if (!response.body) {
-			throw new Error("No response body from Hugging Face API");
-		}
-
-		await this.processStreamingResponse(response.body, progress, token);
 	}
 
 	/**
@@ -321,7 +383,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	private async processStreamingResponse(
 		responseBody: ReadableStream<Uint8Array>,
 		progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-		token: vscode.CancellationToken
+		token: vscode.CancellationToken,
+		streamLog?: fs.WriteStream
 	): Promise<void> {
 		console.log("Starting streaming response processing");
 		const reader = responseBody.getReader();
@@ -341,6 +404,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				buffer = lines.pop() || "";
 
 				for (const line of lines) {
+					if (streamLog) {
+						try { streamLog.write(line + "\n"); } catch {/* ignore */}
+					}
 					if (!line.startsWith("data: ")) {
 						continue;
 					}
@@ -489,5 +555,74 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			this._toolCallBuffers.delete(idx);
 			this._completedToolCallIndices.add(idx);
 		}
+	}
+
+	/**
+	 * Write an error log file with the request payload (if available) and error details.
+	 * Returns the path to the saved file or an empty string on failure.
+	 */
+	private async logErrorToFile(
+		subject: string,
+		payload: unknown | undefined,
+		error: unknown,
+		extra?: Record<string, unknown>
+	): Promise<string> {
+		try {
+			const dir = path.join(os.tmpdir(), "hf-vscode-chat-logs");
+			await fs.promises.mkdir(dir, { recursive: true });
+			const ts = new Date().toISOString().replace(/[:]/g, "-");
+			const filename = `${ts}-${Math.random().toString(36).slice(2, 8)}.json`;
+			const filePath = path.join(dir, filename);
+
+			const errObj: { name?: string; message?: string; stack?: string } = {};
+			if (error && typeof error === "object") {
+				const e = error as Error;
+				errObj.name = e.name;
+				errObj.message = e.message;
+				errObj.stack = e.stack;
+			} else if (typeof error === "string") {
+				errObj.message = error;
+			}
+
+			// attempt to deep-clone and redact sensitive fields
+			const safePayload = (() => {
+				try {
+					if (!payload) {
+						return undefined;
+					}
+					const clone = JSON.parse(JSON.stringify(payload));
+					if (clone && typeof clone === "object") {
+						for (const key of Object.keys(clone)) {
+							if (/api[-_]?key|authorization|token/i.test(key)) {
+								(clone as Record<string, unknown>)[key] = "[REDACTED]";
+							}
+						}
+					}
+					return clone;
+				} catch {
+					return undefined;
+				}
+			})();
+
+			const toWrite = {
+				subject,
+				timestamp: new Date().toISOString(),
+				payload: safePayload,
+				error: errObj,
+				extra,
+			};
+
+			await fs.promises.writeFile(filePath, JSON.stringify(toWrite, null, 2), "utf8");
+			return filePath;
+		} catch (e) {
+			console.error("Failed to write error log:", e);
+			return "";
+		}
+	}
+
+	/** Enable raw streaming logs when env var is set. */
+	private shouldLogStream(): boolean {
+		const val = (process.env.HF_LOG_STREAM || "").toLowerCase();
+		return val === "1" || val === "true" || val === "yes";
 	}
 }
