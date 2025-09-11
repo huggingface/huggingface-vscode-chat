@@ -1,6 +1,6 @@
-## 🤗 Hugging Face Provider for GitHub Copilot Chat
+# 🤗 Hugging Face Provider for GitHub Copilot Chat
 
-![Demo](assets/demo.gif)
+![Demo](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/inference-providers-guides/demo_vscode.gif)
 
 Use frontier open LLMs like Kimi K2, DeepSeek V3.1, GLM 4.5 and more in VS Code with GitHub Copilot Chat powered by [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) 🔥
 
