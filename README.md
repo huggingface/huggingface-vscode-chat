@@ -6,7 +6,7 @@ Bring thousands of open‑source models to GitHub Copilot Chat with a first‑cl
 
 ### ✨ Why use the Hugging Face provider in GitHub Copilot Chat
 - 4k+ open‑source LLMs with tool calling capabilities.
-- Single API to multiple inference providers: Groq, Cerebras, Together AI, SambaNova, and more.
+- Single API to multiple inference providers: Cerebras, Fireworks, Groq, Nebius, Novita, Together AI, SambaNova, and more.
 - Built for high availability and low latency through world‑class providers.
 - No extra markup on provider rates.
 
