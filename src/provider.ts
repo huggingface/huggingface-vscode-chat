@@ -31,6 +31,13 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	/** Indices for which a tool call has been fully emitted. */
 	private _completedToolCallIndices = new Set<number>();
 
+    // No user-facing early announcements; buffer until complete JSON.
+
+	/** Track if we emitted any assistant text before seeing tool calls (SSE-like begin-tool-calls hint). */
+	private _hasEmittedAssistantText = false;
+	/** Track if we emitted the begin-tool-calls whitespace flush. */
+	private _emittedBeginToolCallsHint = false;
+
 	/**
 	 * Create a provider using the given secret storage for the API key.
 	 * @param secrets VS Code secret storage.
@@ -205,6 +212,9 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 		// Reset tool call state for this request
 		this._toolCallBuffers.clear();
 		this._completedToolCallIndices.clear();
+		this._hasEmittedAssistantText = false;
+		this._emittedBeginToolCallsHint = false;
+
 
 		let requestBody: Record<string, unknown> | undefined;
 		try {
@@ -394,6 +404,8 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             // Clean up any leftover tool call state
             this._toolCallBuffers.clear();
             this._completedToolCallIndices.clear();
+            this._hasEmittedAssistantText = false;
+            this._emittedBeginToolCallsHint = false;
         }
     }
 
@@ -410,13 +422,53 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
         if (!choice) { return; }
 
 		const deltaObj = choice.delta as Record<string, unknown> | undefined;
+
+		// Optional: report thinking progress if backend provides it and host supports it.
+		try {
+			const maybeThinking = (choice as Record<string, unknown> | undefined)?.thinking ?? (deltaObj as Record<string, unknown> | undefined)?.thinking;
+			if (maybeThinking !== undefined) {
+				const vsAny = (vscode as unknown as Record<string, unknown>);
+				const ThinkingCtor = vsAny["LanguageModelThinkingPart"] as
+					| (new (text: string, id?: string, metadata?: unknown) => unknown)
+					| undefined;
+				if (ThinkingCtor) {
+					let text = "";
+					let id: string | undefined;
+					let metadata: unknown;
+					if (maybeThinking && typeof maybeThinking === "object") {
+						const mt = maybeThinking as Record<string, unknown>;
+						text = typeof mt["text"] === "string" ? (mt["text"] as string) : "";
+						id = typeof mt["id"] === "string" ? (mt["id"] as string) : undefined;
+						metadata = mt["metadata"];
+					} else if (typeof maybeThinking === "string") {
+						text = maybeThinking;
+					}
+					if (text) {
+						progress.report(new (ThinkingCtor as new (text: string, id?: string, metadata?: unknown) => unknown)(text, id, metadata) as unknown as vscode.LanguageModelResponsePart);
+					}
+				}
+			}
+		} catch {
+			// ignore errors; thinking is optional
+		}
 		if (deltaObj?.content) {
-            const content = deltaObj.content as string;
-            progress.report(new vscode.LanguageModelTextPart(content));
+            let content = deltaObj.content as string;
+            content = this.stripControlTokens(content);
+            if (content.trim().length > 0) {
+                progress.report(new vscode.LanguageModelTextPart(content));
+                this._hasEmittedAssistantText = true;
+            }
 		}
 
 			if (deltaObj?.tool_calls) {
                 const toolCalls = deltaObj.tool_calls as Array<Record<string, unknown>>;
+
+				// SSEProcessor-like: if first tool call appears after text, emit a whitespace
+				// to ensure any UI buffers/linkifiers are flushed without adding visible noise.
+				if (!this._emittedBeginToolCallsHint && this._hasEmittedAssistantText && toolCalls.length > 0) {
+					progress.report(new vscode.LanguageModelTextPart(" "));
+					this._emittedBeginToolCallsHint = true;
+				}
 
 				for (const tc of toolCalls) {
 					const idx = (tc.index as number) ?? 0;
@@ -437,13 +489,15 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 					}
 					this._toolCallBuffers.set(idx, buf);
 
+					// Emit immediately once arguments become valid JSON to avoid perceived hanging
 					await this.tryEmitBufferedToolCall(idx, progress);
 				}
             }
 
 		const finish = (choice.finish_reason as string | undefined) ?? undefined;
 		if (finish === "tool_calls" || finish === "stop") {
-			await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ finish === "tool_calls");
+			// On both 'tool_calls' and 'stop', emit any buffered calls and throw on invalid JSON
+			await this.flushToolCallBuffers(progress, /*throwOnInvalid*/ true);
 		}
 	}
 
@@ -500,6 +554,15 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
             progress.report(new vscode.LanguageModelToolCallPart(id, name, parsed.value));
 			this._toolCallBuffers.delete(idx);
 			this._completedToolCallIndices.add(idx);
+		}
+	}
+
+	/** Strip provider control tokens like <|tool_calls_section_begin|> from streamed text. */
+	private stripControlTokens(text: string): string {
+		try {
+			return text.replace(/<\|[a-zA-Z0-9_-]+_section_(begin|end)\|>/g, "");
+		} catch {
+			return text;
 		}
 	}
 
