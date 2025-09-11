@@ -19,7 +19,7 @@ Bring thousands of open‑source models to GitHub Copilot Chat with a first‑cl
 4. Provide your Hugging Face Token, you can get one in your [settings page](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained).
 5. Select the models you want to add to the model picker. For a given model, you can select the inference provider(s) you want to use!
 
-💡 The free tier gives you monthly inference credits to start building and experimenting. Upgrade to [Hugging Face PRO](https://huggingface.co/pro) for even more flexibility, $2 in monthly credits plus pay‑as‑you‑go access to all providers!
+💡 The free Hugging Face user tier gives you a small amount of monthly inference credits to experiment. Upgrade to [Hugging Face PRO](https://huggingface.co/pro) or [Team or Enterprise](https://huggingface.co/enterprise) for $2 in monthly credits plus pay‑as‑you‑go access across all providers!
 
 
 ---
