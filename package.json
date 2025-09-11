@@ -2,7 +2,7 @@
 	"name": "huggingface-vscode-chat",
 	"publisher": "HuggingFace",
 	"displayName": "Hugging Face Provider for GitHub Copilot Chat",
-	"description": "An extension that integrates Hugging Face Inference Providers into GitHub Copilot Chat.",
+	"description": "An extension that integrates Hugging Face Inference Providers into GitHub Copilot Chat",
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
