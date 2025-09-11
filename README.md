@@ -7,7 +7,6 @@ Use frontier open LLMs like Kimi K2, DeepSeek V3.1, GLM 4.5 and more in VS Code 
 ---
 
 ## ⚡ Quick Start
-
 1. Install the HF Copilot Chat extension [here](https://marketplace.visualstudio.com/items?itemName=HuggingFace.huggingface-vscode-chat).
 2. Open VS Code's chat interface.
 3. Click the model picker and click "Manage Models...".
@@ -16,7 +15,6 @@ Use frontier open LLMs like Kimi K2, DeepSeek V3.1, GLM 4.5 and more in VS Code 
 6. Choose the models you want to add to the model picker. 🥳
 
 ## ✨ Why use the Hugging Face provider in Copilot
-
 - Access [SoTA open-source LLMs](https://huggingface.co/models?pipeline_tag=text-generation&inference_provider=cerebras,together,fireworks-ai,nebius,novita,sambanova,groq,hyperbolic,nscale,fal-ai,cohere,replicate,scaleway,black-forest-labs,ovhcloud&sort=trending) with tool calling capabilities.
 - Single API to switch between multiple providers like Groq, Cerebras, Together AI, SambaNova, and more.
 - Built for high availability (across providers) and low latency.
