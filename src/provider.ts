@@ -54,7 +54,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	 * Create a provider using the given secret storage for the API key.
 	 * @param secrets VS Code secret storage.
 	 */
-	constructor(private readonly secrets: vscode.SecretStorage) {}
+	constructor(private readonly secrets: vscode.SecretStorage, private readonly userAgent: string) {}
 
 	/** Roughly estimate tokens for VS Code chat messages (text only) */
 	private estimateMessagesTokens(msgs: readonly vscode.LanguageModelChatMessage[]): number {
@@ -173,7 +173,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			const modelsList = (async () => {
 				const resp = await fetch(`${BASE_URL}/models`, {
 					method: "GET",
-					headers: { Authorization: `Bearer ${apiKey}` },
+					headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": this.userAgent },
 				});
 				if (!resp.ok) {
 					let text = "";
@@ -294,12 +294,12 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			if (toolConfig.tool_choice) {
 				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
 			}
-
-            const response = await fetch(`${BASE_URL}/chat/completions`, {
+			const response = await fetch(`${BASE_URL}/chat/completions`, {
                 method: "POST",
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
+					"User-Agent": this.userAgent,
                 },
                 body: JSON.stringify(requestBody),
             });

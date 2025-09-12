@@ -24,7 +24,7 @@ suite("HuggingFace Chat Provider Extension", () => {
 				store: async () => {},
 				delete: async () => {},
 				onDidChange: (_listener: unknown) => ({ dispose() {} }),
-			} as unknown as vscode.SecretStorage);
+			} as unknown as vscode.SecretStorage, "GitHubCopilotChat/test VSCode/test");
 
 			const infos = await provider.prepareLanguageModelChatInformation(
 				{ silent: true },
@@ -39,7 +39,7 @@ suite("HuggingFace Chat Provider Extension", () => {
 				store: async () => {},
 				delete: async () => {},
 				onDidChange: (_listener: unknown) => ({ dispose() {} }),
-			} as unknown as vscode.SecretStorage);
+			} as unknown as vscode.SecretStorage, "GitHubCopilotChat/test VSCode/test");
 
 			const est = await provider.provideTokenCount(
 				{
@@ -64,7 +64,7 @@ suite("HuggingFace Chat Provider Extension", () => {
 				store: async () => {},
 				delete: async () => {},
 				onDidChange: (_listener: unknown) => ({ dispose() {} }),
-			} as unknown as vscode.SecretStorage);
+			} as unknown as vscode.SecretStorage, "GitHubCopilotChat/test VSCode/test");
 
 			const msg: vscode.LanguageModelChatMessage = {
 				role: vscode.LanguageModelChatMessageRole.User,
@@ -94,7 +94,7 @@ suite("HuggingFace Chat Provider Extension", () => {
 				store: async () => {},
 				delete: async () => {},
 				onDidChange: (_listener: unknown) => ({ dispose() {} }),
-			} as unknown as vscode.SecretStorage);
+			} as unknown as vscode.SecretStorage, "GitHubCopilotChat/test VSCode/test");
 
 			let threw = false;
 			try {
