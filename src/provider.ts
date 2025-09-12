@@ -112,7 +112,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				const maxInput = Math.max(1, contextLen - maxOutput);
 				entries.push({
 					id: `${m.id}:${p.provider}`,
-					name: m.id,
+					name: `${m.id} via ${p.provider}`,
 					tooltip: `Hugging Face via ${p.provider}`,
 					family: "huggingface",
 					version: "1.0.0",
