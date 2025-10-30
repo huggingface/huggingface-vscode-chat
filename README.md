@@ -14,6 +14,8 @@ Use frontier open LLMs like Kimi K2, DeepSeek V3.1, GLM 4.5 and more in VS Code 
 5. Provide your Hugging Face Token, you can get one in your [settings page](https://huggingface.co/settings/tokens/new?ownUserPermissions=inference.serverless.write&tokenType=fineGrained). You only need to give it the inference.serverless permissions.
 6. Choose the models you want to add to the model picker. 🥳
 
+Each model entry also offers `cheapest` and `fastest` mode for each model, `fastest` selects the provider with highest throughput and `cheapest` selects the provider with lowest price per output token.
+
 ## ✨ Why use the Hugging Face provider in Copilot
 * Access [SoTA open-source LLMs](https://huggingface.co/models?pipeline_tag=text-generation&inference_provider=cerebras,together,fireworks-ai,nebius,novita,sambanova,groq,hyperbolic,nscale,fal-ai,cohere,replicate,scaleway,black-forest-labs,ovhcloud&sort=trending) with tool calling capabilities.
 * Single API to switch between multiple providers: Cerebras, Cohere, Fireworks AI, Groq, HF Inference, Hyperbolic, Nebius, Novita, Nscale, SambaNova, Together AI, and more. See the full list of partners in the [Inference Providers docs](https://huggingface.co/docs/inference-providers/index#partners).
