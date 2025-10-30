@@ -106,6 +106,39 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			const toolProviders = providers.filter((p) => p.supports_tools === true);
 			const entries: LanguageModelChatInformation[] = [];
 
+			if (toolProviders.length > 0) {
+				const contextLengths = toolProviders
+					.map((p) => (typeof p?.context_length === "number" && p.context_length > 0 ? p.context_length : undefined))
+					.filter((len): len is number => typeof len === "number");
+				const aggregateContextLen = contextLengths.length > 0 ? Math.min(...contextLengths) : DEFAULT_CONTEXT_LENGTH;
+				const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
+				const maxInput = Math.max(1, aggregateContextLen - maxOutput);
+				const aggregateCapabilities = {
+					toolCalling: true,
+					imageInput: vision,
+				};
+				entries.push({
+					id: `${m.id}:cheapest`,
+					name: `${m.id} (cheapest)`,
+					tooltip: "Hugging Face via the cheapest provider",
+					family: "huggingface",
+					version: "1.0.0",
+					maxInputTokens: maxInput,
+					maxOutputTokens: maxOutput,
+					capabilities: aggregateCapabilities,
+				} satisfies LanguageModelChatInformation);
+				entries.push({
+					id: `${m.id}:fastest`,
+					name: `${m.id} (fastest)`,
+					tooltip: "Hugging Face via the fastest provider",
+					family: "huggingface",
+					version: "1.0.0",
+					maxInputTokens: maxInput,
+					maxOutputTokens: maxOutput,
+					capabilities: aggregateCapabilities,
+				} satisfies LanguageModelChatInformation);
+			}
+
 			for (const p of toolProviders) {
 				const contextLen = p?.context_length ?? DEFAULT_CONTEXT_LENGTH;
 				const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
@@ -125,7 +158,7 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 				} satisfies LanguageModelChatInformation);
 			}
 
-			if (entries.length === 0 && providers.length > 0) {
+			if (toolProviders.length === 0 && providers.length > 0) {
 				const base = providers[0];
 				const contextLen = base?.context_length ?? DEFAULT_CONTEXT_LENGTH;
 				const maxOutput = DEFAULT_MAX_OUTPUT_TOKENS;
