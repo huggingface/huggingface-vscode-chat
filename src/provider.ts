@@ -81,6 +81,17 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 	}
 
 	/**
+	 * Organization (or Enterprise resource group) that inference usage should be billed to.
+	 * Read from the `huggingface.billTo` setting; forwarded as the `X-HF-Bill-To` header.
+	 * Returns `undefined` when unset so requests fall back to the token owner's account.
+	 */
+	private getBillTo(): string | undefined {
+		const billTo = vscode.workspace.getConfiguration("huggingface").get<string>("billTo");
+		const trimmed = billTo?.trim();
+		return trimmed ? trimmed : undefined;
+	}
+
+	/**
 	 * Get the list of available language models contributed by this provider
 	 * @param options Options which specify the calling context of this function
 	 * @param token A cancellation token which signals if the user cancelled the request or not
@@ -327,13 +338,19 @@ export class HuggingFaceChatModelProvider implements LanguageModelChatProvider {
 			if (toolConfig.tool_choice) {
 				(requestBody as Record<string, unknown>).tool_choice = toolConfig.tool_choice;
 			}
+			const headers: Record<string, string> = {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+				"User-Agent": this.userAgent,
+			};
+			// Centralize billing to a Team/Enterprise organization (or resource group) when configured.
+			const billTo = this.getBillTo();
+			if (billTo) {
+				headers["X-HF-Bill-To"] = billTo;
+			}
 			const response = await fetch(`${BASE_URL}/chat/completions`, {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-					"User-Agent": this.userAgent,
-                },
+                headers,
                 body: JSON.stringify(requestBody),
             });
 

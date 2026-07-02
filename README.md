@@ -30,6 +30,26 @@ Each model entry also offers `cheapest` and `fastest` mode for each model. `fast
 * VS Code 1.104.0 or higher.
 * Hugging Face access token with `inference.serverless` permissions.
 
+## 🏢 Billing to a Team or Enterprise organization
+
+[Team and Enterprise organizations](https://huggingface.co/enterprise) can centralize Inference Providers billing: every member keeps using their own access token, but the requests are charged to the organization instead of the individual account.
+
+Enable it from the extension:
+1. Open the chat model picker → **Manage Models…** → **Hugging Face**.
+2. Choose **Bill to an Organization** and enter your organization name (e.g. `my-org`).
+
+Or set it directly in your VS Code settings:
+```jsonc
+// settings.json
+"huggingface.billTo": "my-org"
+```
+
+The extension forwards this value as the `X-HF-Bill-To` header on inference requests.
+
+**Resource groups.** Enterprise organizations with [Resource Groups](https://huggingface.co/docs/hub/security-resource-groups) can attribute inference costs to a specific group by entering the **resource group ID** instead of the organization name. Your token must be a member of that resource group.
+
+> ℹ️ Your access token must belong to the organization. Usage is tracked on the organization's billing page, where admins can set a spending limit and disable specific providers. Team & Enterprise organizations also receive a pool of free monthly credits based on the number of seats.
+
 ## 🛠️ Development
 ```bash
 git clone https://github.com/huggingface/huggingface-vscode-chat
