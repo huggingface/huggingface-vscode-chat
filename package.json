@@ -50,7 +50,18 @@
 				"command": "huggingface.manage",
 				"title": "Manage Hugging Face Provider"
 			}
-		]
+		],
+		"configuration": {
+			"title": "Hugging Face",
+			"properties": {
+				"huggingface.billTo": {
+					"type": "string",
+					"default": "",
+					"markdownDescription": "Bill Hugging Face Inference Providers usage to a Team or Enterprise organization instead of your personal account. Enter your **organization name** (e.g. `my-org`), or an Enterprise **resource group ID** to attribute costs to a specific resource group. You still authenticate with your own access token, which must be a member of the organization (or resource group). Sent as the `X-HF-Bill-To` header on inference requests. [Learn more](https://huggingface.co/docs/inference-providers/pricing#billing-for-team-and-enterprise-organizations).",
+					"scope": "machine-overridable"
+				}
+			}
+		}
 	},
 	"main": "./out/extension.js",
 	"scripts": {
