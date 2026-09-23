@@ -4,8 +4,12 @@ on:
   push:
     branches:
       - 'release/**'
+permissions: {}
+
 jobs:
   package:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -37,6 +41,8 @@ jobs:
           path: extension.vsix
 
   publish:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: [package]
     steps:
